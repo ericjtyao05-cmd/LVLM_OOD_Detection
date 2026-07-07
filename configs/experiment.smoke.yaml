@@ -1,0 +1,53 @@
+# Reduced preset for a fast first end-to-end run on real hardware.
+# Same design as experiment.yaml, smaller counts. Scale up via experiment.yaml.
+seed: 0
+run_id: null
+model:
+  name: llava-1.5-7b
+  dtype: float16
+  prompt: "USER: <image>\nWhat is the main object in this image? Answer with a single word. ASSISTANT:"
+detector:
+  methods: [msp, energy, mahalanobis]
+  knn_k: 50
+data:
+  id:
+    source: imagenet-1k
+    classes:
+      - {name: tabby_cat,          wnid: n02123045}
+      - {name: labrador_retriever, wnid: n02099712}
+      - {name: goldfish,           wnid: n01443537}
+      - {name: bald_eagle,         wnid: n01614925}
+      - {name: african_elephant,   wnid: n02504458}
+      - {name: zebra,              wnid: n02391049}
+      - {name: tiger,              wnid: n02129604}
+      - {name: brown_bear,         wnid: n02132136}
+      - {name: ostrich,            wnid: n01518878}
+      - {name: sports_car,         wnid: n04285008}
+      - {name: school_bus,         wnid: n04146614}
+      - {name: airliner,           wnid: n02690373}
+      - {name: mountain_bike,      wnid: n03792782}
+      - {name: grand_piano,        wnid: n03452741}
+      - {name: steam_locomotive,   wnid: n04310018}
+    max_per_class: 100
+    test_frac: 0.2
+  ood_real:
+    source: dtd
+    size: 1500
+  fake:
+    whoops:        {enabled: true,  limit: 500}
+    sdxl_aligned:  {enabled: true,  n_per_class: 25}
+    sdxl_freeform: {enabled: true,  n: 200}
+conditions:
+  id_fake_ratios:  [0.0, 0.01, 0.10, 0.25]
+  ood_fake_ratios: [0.0, 0.01, 0.10, 0.25]
+  grid: families
+  ood_test_size: 1500
+  fake_probe_size: 400
+upload:
+  repo: "https://github.com/ericjtyao05-cmd/LVLM_OOD_Detection.git"
+  branch: results
+  raw:        [results.json, logs, manifests]
+  paper_ready: true
+lifecycle:
+  auto_destroy: watcher
+  done_marker: results/DONE

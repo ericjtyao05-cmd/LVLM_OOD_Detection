@@ -82,9 +82,10 @@ def run_aligned(args):
     for cls in args.classes:
         outdir = Path(args.out) / cls
         outdir.mkdir(parents=True, exist_ok=True)
+        readable = cls.replace("_", " ")   # folder stays 'tabby_cat', prompt says 'tabby cat'
         for i in range(args.n_per_class):
             tmpl = ALIGNED_TEMPLATES[i % len(ALIGNED_TEMPLATES)]
-            prompt = tmpl.format(c=cls)
+            prompt = tmpl.format(c=readable)
             img = _gen(pipe, steps, prompt, rng.randint(0, 2**31))
             img.save(outdir / f"{cls}_{i:04d}.png")
             if i % 10 == 0:
