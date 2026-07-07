@@ -120,26 +120,27 @@ Watch the GPU in another pane (`Ctrl-b "` to split): `watch -n1 nvidia-smi`.
 
 ## 6. Pull results back, then DESTROY
 
+Results already live on GitHub (the `results` branch) and images on the private
+HF dataset — so **nothing needs downloading from the box**. Pull local copies
+anytime from your laptop:
 ```bash
-# from laptop
-rsync -avP -e "ssh -i ~/.ssh/vast_ed25519 -p 41234" \
-      root@ssh5.vast.ai:/root/LVLM_OOD_Detection/manifests/ ./manifests/
+./scripts/pull_local.sh            # dataset (HF) -> ./data ; results (git) -> ./results
 ```
-Then in the console click **Destroy** on the instance (Stop only pauses billing
-for compute but you still pay storage; **Destroy** ends all charges). Confirm the
-instance is gone from **Instances**.
+Then **Destroy** the instance (from the console, or the laptop watcher does it
+automatically once the `DONE` marker appears on the `results` branch):
+```bash
+export VAST_API_KEY=...            # laptop only, never on the box
+./scripts/destroy_watcher.sh <INSTANCE_ID>
+```
 
-## 7. Cost & gotchas checklist
+## 7. Gotchas checklist
 
-* **Always Destroy when done** — idle rented GPUs bill by the second.
-* **tmux** everything; SSH drops are common.
+* **tmux** long jobs; SSH drops are common. (Billing is shown in the vast console —
+  no manual tracking needed here.)
 * Persist to `/workspace` (large volume); `/root` may be small.
 * If `torch.cuda.is_available()` is `False`, you rented a CPU offer or the driver
   mismatches the image — destroy and pick a proper PyTorch/CUDA template.
-* Interruptible instances can be reclaimed anytime — only use once you checkpoint.
-* Keep a `setup.sh` with §3 commands so re-provisioning a fresh box is one line.
-```
-
-> This repo also ships a `run-experiment` / `vast-gpu` skill integration — you can
-> let the assistant rent, deploy, and destroy for you once the manual flow makes
-> sense to you.
+* Keep the SSH key loaded in your agent (`ssh-add`) — vast keys are often
+  passphrase-protected; a locked key gives "Server accepts key … Permission denied".
+* `data.reuse: true` in the config makes a fresh box **pull** the HF snapshot
+  instead of rebuilding — identical data, much faster.

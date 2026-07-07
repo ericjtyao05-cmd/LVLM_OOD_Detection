@@ -13,42 +13,53 @@ respond as fakes are mixed in at controlled ratios.
 Full write-up: **[docs/DESIGN.md](docs/DESIGN.md)**.
 GPU walkthrough: **[docs/vast_ai_guide.md](docs/vast_ai_guide.md)**.
 
+## Configuration — two files, one place each
+- **`configs/experiment.yaml`** — every *non-secret* knob: `model`, `detector`
+  methods, `data` (+ `reuse`), condition grid, `hf.dataset_repo`, results `upload`.
+  Swap the model or detector by editing one line.
+- **`.env`** (git-ignored; template in **`.env.example`**) — every *secret*:
+  `HF_TOKEN`, `GITHUB_TOKEN`, `VAST_API_KEY`. All code reads secrets only from here.
+
+## Artifact split (right tool per artifact)
+| Artifact | Home | Why |
+|---|---|---|
+| Code, **manifests** (splits), configs | this git repo | small, diff-able, versioned |
+| **Images** (`data/`) | **private HF dataset** (`hf.dataset_repo`) | large + ImageNet license → not in git |
+| **Results** (json/tables/heatmaps) | git **`results` branch** | small, want them in the repo |
+
 ## Layout
 ```
-configs/
-  experiment.yaml        # single source of truth: model, detectors, data, grid, upload
-  datasets.example.json  # low-level mixing-pipeline config
+configs/experiment.yaml    # non-secret single source of truth (+ experiment.smoke.yaml)
+.env.example               # secrets template -> copy to .env
 src/
-  registry.py            # string-keyed MODEL_REGISTRY / DETECTOR_REGISTRY (swap = 1 line)
-  config.py  metrics.py  # yaml loader; AUROC/FPR95 (rank-based)
-  prepare_data.py        # ImageNet-1k(gated) + DTD + WHOOPS -> data/
-  generate_fakes.py      # SDXL: category-aligned + freeform fakes (GPU)
-  build_datasets.py      # mixing pipeline core -> CSV manifests
-  build_from_config.py   # experiment.yaml -> mixing pipeline
-  models/llava.py        # @register_model: LLaVA-1.5-7B -> {hidden, logits}
-  detectors.py           # @register_detector: msp / energy / mahalanobis
-  run_all.py             # loop conditions -> score -> results/<run>/*.json
-  paperize.py            # results -> CSV + LaTeX table + AUROC heatmaps
+  registry.py              # string-keyed MODEL_REGISTRY / DETECTOR_REGISTRY (swap = 1 line)
+  config.py  metrics.py    # yaml loader; AUROC/FPR95 (rank-based)
+  prepare_data.py          # ImageNet-1k(gated) + DTD + WHOOPS -> data/
+  generate_fakes.py        # SDXL: category-aligned + freeform fakes (GPU)
+  build_datasets.py / build_from_config.py   # mixing pipeline -> CSV manifests
+  dataset_hub.py           # push/pull the private HF image snapshot
+  models/llava.py          # @register_model: LLaVA-1.5-7B -> {hidden, logits}
+  detectors.py             # @register_detector: msp / energy / mahalanobis
+  run_all.py  paperize.py  # score conditions -> results + LaTeX/heatmaps
 scripts/
-  bootstrap.sh           # one-shot unattended run on a fresh vast.ai box
-  destroy_watcher.sh     # laptop-side auto-destroy (keeps VAST key off the box)
+  bootstrap.sh             # one-shot unattended run on a fresh vast.ai box
+  pull_local.sh            # laptop: pull dataset (HF) + results (git) locally
+  destroy_watcher.sh       # laptop-side auto-destroy (keeps VAST key off the box)
 docs/DESIGN.md, docs/vast_ai_guide.md
 ```
 
-## Data layout (built automatically by the pipeline)
-```
-data/
-  id_real/<class>/*.jpg   # real ID (ImageNet-1k, 15 classes — see experiment.yaml)
-  ood_real/*.jpg          # real OOD (Textures/DTD)
-  fake_id/<class>/*.jpg   # category-aligned fakes (generate_fakes.py aligned)
-  fake_ood/*.jpg          # WHOOPS! + freeform fakes
-```
+## Workflow
+**First run** (builds data): `bootstrap.sh` → build ImageNet+DTD+WHOOPS+SDXL →
+**push images to private HF** → build manifests → run → **push results to git**.
+Pin the printed HF revision in `hf.revision` for exact reruns.
+**Later runs** (`data.reuse: true`): **pull the HF snapshot** (byte-exact) →
+build → run → push results. No rebuild, identical data.
+**Local copies**: `scripts/pull_local.sh` pulls the private dataset + results to
+your laptop (the HF dataset is private, so this is how you keep/share a copy).
 
-## Automated run (fresh server)
-Set `GITHUB_TOKEN` + `HF_TOKEN` in the vast **onstart** field, then it self-runs:
-env → data → build → all conditions → upload results → DONE. See
-[docs/vast_ai_guide.md](docs/vast_ai_guide.md). Locally you can still run stages
-by hand (`build_datasets.py`, etc.).
+Set `GITHUB_TOKEN` + `HF_TOKEN` in the vast **onstart** field and the box self-runs
+env → data → build → conditions → results → DONE. See
+[docs/vast_ai_guide.md](docs/vast_ai_guide.md).
 
 Baseline method = **MSP** (Hendrycks & Gimpel 2017); headline hidden-state method
 = **Mahalanobis** (Lee et al. 2018). For the full ~40-method zoo, cross-reference

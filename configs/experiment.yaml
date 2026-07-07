@@ -18,8 +18,11 @@ detector:
 
 # ---- data (real ID is gated ImageNet-1k via HF_TOKEN) -----------------------
 data:
+  reuse: false            # true -> pull the prebuilt snapshot from HF (hf.dataset_repo)
+                          #         instead of re-running prepare_data + generate_fakes
   id:
     source: imagenet-1k     # HuggingFace, gated -> needs HF_TOKEN
+    split: validation
     classes:                # 15 picked synsets
       - {name: tabby_cat,          wnid: n02123045}
       - {name: labrador_retriever, wnid: n02099712}
@@ -54,11 +57,17 @@ conditions:
   ood_test_size: 3000
   fake_probe_size: 500
 
-# ---- result upload (same repo, dedicated branch) ----------------------------
+# ---- dataset snapshot on HuggingFace (private; images live here, not in git) -
+hf:
+  dataset_repo: "EricY05/lvlm-ood-fake-data"   # private HF dataset for the images
+  private: true
+  revision: null          # pin a commit sha here for byte-exact reruns (null=latest)
+
+# ---- result upload (code repo, dedicated branch) ----------------------------
 upload:
   repo: "https://github.com/ericjtyao05-cmd/LVLM_OOD_Detection.git"
   branch: results
-  raw:        [results.json, logs, manifests]   # reproducible originals
+  raw:        [results.json, logs, manifests]   # reproducible originals -> git
   paper_ready: true                             # LaTeX tables + AUROC/FPR95 heatmaps
 
 # ---- lifecycle --------------------------------------------------------------

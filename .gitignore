@@ -1,7 +1,9 @@
 # data & artifacts
+# data/  -> private HF dataset (images; not in git). results/ -> git `results` branch.
+# manifests/ ARE committed (small CSVs; define the splits for reproducibility).
 data/
-manifests/
 results/
+results-download/
 *.pt
 *.pth
 *.ckpt
@@ -17,6 +19,8 @@ venv/
 # secrets — never commit tokens
 .env
 .env.*
+# ...but DO commit the template:
+!.env.example
 *token*
 *secret*
 results-download/

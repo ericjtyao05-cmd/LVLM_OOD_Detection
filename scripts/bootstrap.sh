@@ -1,79 +1,62 @@
 #!/usr/bin/env bash
-# One-shot unattended bootstrap for a freshly rented vast.ai GPU (4090).
-# Paste this (or a curl to it) into the vast instance "onstart" field, and set
-# the env vars GITHUB_TOKEN / HF_TOKEN / REPO_URL there too. Secrets stay in the
-# instance environment; nothing is written into the git repo.
+# One-shot unattended bootstrap for a freshly rented vast.ai GPU.
+# Paste into the vast "onstart" field. Secrets come from /workspace/.env
+# (HF_TOKEN, GITHUB_TOKEN) -- see .env.example. Nothing secret is committed.
 #
-# Flow:  env -> clone -> deps -> data -> build conditions -> run -> upload -> DONE
-# Auto-destroy is handled OFF-box by scripts/destroy_watcher.sh (option A): this
-# script only pushes a DONE marker; your laptop watcher destroys the instance.
+# Data flow (set by `data.reuse` in the config):
+#   reuse=false : build data (prepare_data + generate_fakes) -> PUSH to private HF
+#   reuse=true  : PULL the prebuilt snapshot from HF (byte-exact via hf.revision)
+# Results (raw + paper-ready) are always PUSHED to the git `results` branch.
+# Teardown is off-box: scripts/destroy_watcher.sh (keeps the vast key off here).
 set -euo pipefail
 
-# ---- required env (injected via vast onstart, NEVER committed) ---------------
-: "${GITHUB_TOKEN:?set GITHUB_TOKEN (fine-grained PAT, contents:rw on the repo)}"
-: "${HF_TOKEN:?set HF_TOKEN (HuggingFace token with ImageNet-1k access)}"
+: "${GITHUB_TOKEN:?}"; : "${HF_TOKEN:?}"
 REPO_URL="${REPO_URL:-https://github.com/ericjtyao05-cmd/LVLM_OOD_Detection.git}"
+CONFIG="${CONFIG:-configs/experiment.yaml}"
 WORK="${WORK:-/workspace}"
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
-CONFIG="${CONFIG:-configs/experiment.yaml}"
-
-export HF_HOME="$WORK/hf"
-export HF_TOKEN
-mkdir -p "$WORK" "$HF_HOME"
-cd "$WORK"
-
+export HF_HOME="$WORK/hf" HF_HUB_DOWNLOAD_TIMEOUT=120 PYTHONUNBUFFERED=1
+mkdir -p "$WORK" "$HF_HOME"; cd "$WORK"
 log() { echo "[$(date -u +%H:%M:%S)] $*"; }
 
-# ---- clone code (token only used in-memory for the authed remote) -----------
 AUTH_REMOTE="https://x-access-token:${GITHUB_TOKEN}@${REPO_URL#https://}"
-if [ ! -d repo/.git ]; then
-  git clone "$AUTH_REMOTE" repo
-fi
+[ -d repo/.git ] || git clone "$AUTH_REMOTE" repo
 cd repo
-git config user.email "bot@vast"; git config user.name "vast-runner"
+git config user.email bot@vast; git config user.name vast-runner
+ln -sf "$WORK/.env" .env 2>/dev/null || true
 
-# ---- system + python deps ---------------------------------------------------
-log "installing deps"
-apt-get update -y && apt-get install -y git tmux rsync jq >/dev/null 2>&1 || true
-pip install -q -r requirements.txt
-pip install -q "transformers>=4.43" accelerate bitsandbytes sentencepiece \
-               protobuf scikit-learn matplotlib pyyaml huggingface_hub
+log "installing deps"; pip install -q -r requirements.txt
+python -c "import torch; assert torch.cuda.is_available()" || { log "no CUDA"; exit 1; }
 
-python - <<'PY'
-import torch; assert torch.cuda.is_available(), "no CUDA!"
-print("[env] GPU:", torch.cuda.get_device_name(0))
-PY
+REUSE=$(python -c "import yaml;print(str(yaml.safe_load(open('$CONFIG'))['data'].get('reuse',False)).lower())")
 
-# ---- pull datasets (ID gated via HF_TOKEN) ----------------------------------
-log "pulling datasets"
-python -m src.prepare_data --config "$CONFIG"     # ID(ImageNet)+OOD(DTD)+WHOOPS
-python src/generate_fakes.py aligned  --classes tabby_cat labrador_retriever goldfish \
-        bald_eagle african_elephant zebra tiger brown_bear ostrich sports_car \
-        school_bus airliner mountain_bike grand_piano steam_locomotive \
-        --out data/fake_id || log "WARN: aligned fake gen skipped"
-python src/generate_fakes.py freeform --n 500 --out data/fake_ood || log "WARN: freeform skipped"
+# ---------------- data ----------------
+if [ "$REUSE" = "true" ]; then
+  log "reuse=true -> pulling dataset snapshot from HF"
+  python -m src.dataset_hub pull --config "$CONFIG" --dest .
+else
+  log "reuse=false -> building dataset"
+  python -m src.prepare_data --config "$CONFIG"
+  python src/generate_fakes.py aligned --n-per-class 25 --out data/fake_id \
+    --classes tabby_cat labrador_retriever goldfish bald_eagle african_elephant \
+              zebra tiger brown_bear ostrich sports_car school_bus airliner \
+              mountain_bike grand_piano steam_locomotive || log "WARN aligned fakes skipped"
+  python src/generate_fakes.py freeform --n 200 --out data/fake_ood || log "WARN freeform skipped"
+  log "pushing dataset snapshot to HF (private)"
+  python -m src.dataset_hub push --config "$CONFIG"    # prints revision to pin
+fi
 
-# ---- build conditions -------------------------------------------------------
-log "building manifests"
+# ------------- build + run -------------
 python -m src.build_from_config --config "$CONFIG" --out-dir manifests
-
-# ---- run every condition + write results ------------------------------------
-log "running experiments"
-python -m src.run_all --config "$CONFIG" --manifests manifests \
-       --results "results/$RUN_ID" 2>&1 | tee "results_${RUN_ID}.log"
-
-# ---- paper-ready artifacts --------------------------------------------------
+python -m src.run_all  --config "$CONFIG" --manifests manifests --results "results/$RUN_ID" \
+  2>&1 | tee "results/$RUN_ID.log" || true
+mkdir -p "results/$RUN_ID"; mv "results/$RUN_ID.log" "results/$RUN_ID/run.log" 2>/dev/null || true
 python -m src.paperize --results "results/$RUN_ID" --out "results/$RUN_ID/paper"
 
-# ---- upload to the results branch -------------------------------------------
-log "uploading results"
-cp "results_${RUN_ID}.log" "results/$RUN_ID/run.log"
-git fetch origin results || true
-git checkout results 2>/dev/null || git checkout --orphan results
-git add results/ manifests/ configs/experiment.yaml
-git commit -m "results: run $RUN_ID" || log "nothing to commit"
-echo "$RUN_ID" > results/DONE
-git add results/DONE && git commit -m "DONE $RUN_ID"
+# ------------- push results to git -------------
+log "pushing results + manifests to git results branch"
+git fetch origin results 2>/dev/null && git checkout results || git checkout --orphan results
+git add -f results/ manifests/ configs/ && git commit -m "results: run $RUN_ID" || log "nothing to commit"
+echo "$RUN_ID" > results/DONE && git add -f results/DONE && git commit -m "DONE $RUN_ID"
 git push "$AUTH_REMOTE" HEAD:results
-
-log "DONE $RUN_ID -- laptop watcher will destroy this instance"
+log "DONE $RUN_ID -- results on GitHub; laptop watcher will destroy this box"

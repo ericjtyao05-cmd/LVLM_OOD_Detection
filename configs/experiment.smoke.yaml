@@ -10,6 +10,7 @@ detector:
   methods: [msp, energy, mahalanobis]
   knn_k: 50
 data:
+  reuse: false          # true -> pull snapshot from hf.dataset_repo instead of rebuilding
   id:
     source: imagenet-1k
     split: validation   # 50k imgs (~50/class), bounded stream; train needs ~11GB scan
@@ -46,6 +47,10 @@ conditions:
   grid: families
   ood_test_size: 1500
   fake_probe_size: 400
+hf:
+  dataset_repo: "EricY05/lvlm-ood-fake-data"
+  private: true
+  revision: "6ddbf0deb7568c33f39a0282c0c5c83ac989f129"   # smoke snapshot (reuse=true pulls this)
 upload:
   repo: "https://github.com/ericjtyao05-cmd/LVLM_OOD_Detection.git"
   branch: results
