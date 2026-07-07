@@ -12,6 +12,7 @@ detector:
 data:
   id:
     source: imagenet-1k
+    split: val          # 50k imgs (~50/class), bounded stream; train needs ~11GB scan
     classes:
       - {name: tabby_cat,          wnid: n02123045}
       - {name: labrador_retriever, wnid: n02099712}
@@ -28,7 +29,7 @@ data:
       - {name: mountain_bike,      wnid: n03792782}
       - {name: grand_piano,        wnid: n03452741}
       - {name: steam_locomotive,   wnid: n04310018}
-    max_per_class: 100
+    max_per_class: 50   # val split has 50/class
     test_frac: 0.2
   ood_real:
     source: dtd
@@ -38,7 +39,9 @@ data:
     sdxl_aligned:  {enabled: true,  n_per_class: 25}
     sdxl_freeform: {enabled: true,  n: 200}
 conditions:
-  id_fake_ratios:  [0.0, 0.01, 0.10, 0.25]
+  # ID-contamination axis needs category-aligned SDXL fakes (data/fake_id),
+  # deferred until diffusers/torch fixed -> keep [0.0] for this OOD-axis run.
+  id_fake_ratios:  [0.0]
   ood_fake_ratios: [0.0, 0.01, 0.10, 0.25]
   grid: families
   ood_test_size: 1500
