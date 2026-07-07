@@ -12,7 +12,7 @@ detector:
 data:
   id:
     source: imagenet-1k
-    split: val          # 50k imgs (~50/class), bounded stream; train needs ~11GB scan
+    split: validation   # 50k imgs (~50/class), bounded stream; train needs ~11GB scan
     classes:
       - {name: tabby_cat,          wnid: n02123045}
       - {name: labrador_retriever, wnid: n02099712}
