@@ -92,16 +92,19 @@ def prepare_imagenet(cfg, out_root: Path, max_scan: int):
 
 
 def prepare_dtd(cfg, out_root: Path):
-    """Real OOD = Describable Textures (torchvision, no login)."""
-    from torchvision.datasets import DTD
+    """Real OOD = Describable Textures (DTD), pulled from a fast HF mirror.
+
+    torchvision's DTD downloads from thor.robots.ox.ac.uk which is heavily
+    throttled (~20 KB/s); the HF mirror is orders of magnitude faster.
+    """
+    from datasets import load_dataset
     size = cfg["data"]["ood_real"].get("size", 3000)
     dst = out_root / "ood_real"; dst.mkdir(parents=True, exist_ok=True)
-    ds = DTD(root=str(out_root / "_dtd_cache"), split="train", download=True)
+    ds = load_dataset("tanganke/dtd", split="train")   # 3760 imgs, cols image/label
     n = min(size, len(ds))
     for i in range(n):
-        img, _ = ds[i]
-        img.convert("RGB").save(dst / f"dtd_{i:04d}.jpg")
-    print(f"[dtd] {n} texture images -> {dst}")
+        ds[i]["image"].convert("RGB").save(dst / f"dtd_{i:04d}.jpg")
+    print(f"[dtd] {n} texture images (HF tanganke/dtd) -> {dst}")
 
 
 def prepare_whoops(cfg, out_root: Path):
