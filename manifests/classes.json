@@ -1,0 +1,36 @@
+{
+  "classes": [
+    "african_elephant",
+    "airliner",
+    "bald_eagle",
+    "brown_bear",
+    "goldfish",
+    "grand_piano",
+    "labrador_retriever",
+    "mountain_bike",
+    "ostrich",
+    "school_bus",
+    "sports_car",
+    "steam_locomotive",
+    "tabby_cat",
+    "tiger",
+    "zebra"
+  ],
+  "cls2idx": {
+    "african_elephant": 0,
+    "airliner": 1,
+    "bald_eagle": 2,
+    "brown_bear": 3,
+    "goldfish": 4,
+    "grand_piano": 5,
+    "labrador_retriever": 6,
+    "mountain_bike": 7,
+    "ostrich": 8,
+    "school_bus": 9,
+    "sports_car": 10,
+    "steam_locomotive": 11,
+    "tabby_cat": 12,
+    "tiger": 13,
+    "zebra": 14
+  }
+}
