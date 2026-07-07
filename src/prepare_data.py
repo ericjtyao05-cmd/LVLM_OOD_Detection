@@ -64,8 +64,9 @@ def prepare_imagenet(cfg, out_root: Path, max_scan: int):
     per_class = idc.get("max_per_class", 300)
     wanted = {c["name"]: IMAGENET_KEYWORDS[c["name"]] for c in idc["classes"]}
 
-    # peek label names (non-streaming features are cheap)
-    feats = load_dataset("imagenet-1k", split=split, streaming=True, token=token)
+    # peek label names (non-streaming features are cheap).
+    # datasets>=5 requires the namespaced id; bare "imagenet-1k" is rejected.
+    feats = load_dataset("ILSVRC/imagenet-1k", split=split, streaming=True, token=token)
     label_names = feats.features["label"].names
     idx_to_name = _resolve_indices(label_names, wanted)
 
