@@ -1,0 +1,29 @@
+# data & artifacts
+data/
+manifests/
+results/
+*.pt
+*.pth
+*.ckpt
+wandb/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# secrets — never commit tokens
+.env
+.env.*
+*token*
+*secret*
+results-download/
+
+# tool / session state
+.aris/
+.claude/
+
+# os
+.DS_Store

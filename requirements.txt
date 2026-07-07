@@ -1,0 +1,20 @@
+# Core (build_datasets, run_all, detectors, paperize)
+torch>=2.1
+torchvision>=0.16       # DTD (real OOD) download in prepare_data.py
+numpy>=1.24
+pillow>=10.0
+pyyaml>=6.0             # experiment.yaml
+matplotlib>=3.7         # paperize heatmaps
+
+# LVLM (models/llava.py) + data/fakes
+transformers>=4.43     # LlavaForConditionalGeneration
+accelerate>=0.29
+bitsandbytes>=0.43     # optional 4-bit
+sentencepiece
+protobuf
+datasets>=2.19         # ImageNet-1k (gated) + WHOOPS!
+diffusers>=0.27        # SDXL fake generation (generate_fakes.py)
+safetensors>=0.4
+
+# Optional: OpenOOD for the full method zoo (see docs/DESIGN.md)
+# git+https://github.com/Jingkang50/OpenOOD.git

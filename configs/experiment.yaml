@@ -1,0 +1,67 @@
+# Single source of truth for a run. Everything swappable lives here.
+# Secrets are NEVER in this file -- they come from env vars (GITHUB_TOKEN, HF_TOKEN).
+
+seed: 0
+run_id: null            # null -> bootstrap sets a UTC timestamp
+
+# ---- swap the model here (key into MODEL_REGISTRY in src/registry.py) --------
+model:
+  name: llava-1.5-7b
+  dtype: float16
+  # prompt used to elicit a single forward pass; last-token hidden state + logits
+  prompt: "USER: <image>\nWhat is the main object in this image? Answer with a single word. ASSISTANT:"
+
+# ---- swap detectors here (keys into DETECTOR_REGISTRY) -----------------------
+detector:
+  methods: [msp, energy, mahalanobis]   # add "knn", "vim", ... later
+  knn_k: 50
+
+# ---- data (real ID is gated ImageNet-1k via HF_TOKEN) -----------------------
+data:
+  id:
+    source: imagenet-1k     # HuggingFace, gated -> needs HF_TOKEN
+    classes:                # 15 picked synsets
+      - {name: tabby_cat,          wnid: n02123045}
+      - {name: labrador_retriever, wnid: n02099712}
+      - {name: goldfish,           wnid: n01443537}
+      - {name: bald_eagle,         wnid: n01614925}
+      - {name: african_elephant,   wnid: n02504458}
+      - {name: zebra,              wnid: n02391049}
+      - {name: tiger,              wnid: n02129604}
+      - {name: brown_bear,         wnid: n02132136}
+      - {name: ostrich,            wnid: n01518878}
+      - {name: sports_car,         wnid: n04285008}
+      - {name: school_bus,         wnid: n04146614}
+      - {name: airliner,           wnid: n02690373}
+      - {name: mountain_bike,      wnid: n03792782}
+      - {name: grand_piano,        wnid: n03452741}
+      - {name: steam_locomotive,   wnid: n04310018}
+    max_per_class: 300
+    test_frac: 0.2
+  ood_real:
+    source: dtd             # Describable Textures (torchvision, no login)
+    size: 3000
+  fake:
+    whoops:        {enabled: true,  limit: 500}     # human-curated impossible imgs
+    sdxl_aligned:  {enabled: true,  n_per_class: 60}  # category-aligned (ID contamination)
+    sdxl_freeform: {enabled: true,  n: 500}         # generic impossible (OOD/probe)
+
+# ---- experiment grid (mixing pipeline) --------------------------------------
+conditions:
+  id_fake_ratios:  [0.0, 0.01, 0.10, 0.25]
+  ood_fake_ratios: [0.0, 0.01, 0.10, 0.25]
+  grid: families          # "families" (10 conds) or "full" (16)
+  ood_test_size: 3000
+  fake_probe_size: 500
+
+# ---- result upload (same repo, dedicated branch) ----------------------------
+upload:
+  repo: "https://github.com/ericjtyao05-cmd/LVLM_OOD_Detection.git"
+  branch: results
+  raw:        [results.json, logs, manifests]   # reproducible originals
+  paper_ready: true                             # LaTeX tables + AUROC/FPR95 heatmaps
+
+# ---- lifecycle --------------------------------------------------------------
+lifecycle:
+  auto_destroy: watcher    # "watcher" (laptop-side, option A) or "self" (key on box)
+  done_marker: results/DONE  # pushed to the results branch when finished
