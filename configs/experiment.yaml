@@ -22,7 +22,7 @@ data:
                           #         instead of re-running prepare_data + generate_fakes
   id:
     source: imagenet-1k     # HuggingFace, gated -> needs HF_TOKEN
-    split: validation
+    split: train            # train has ~1300/class (needed for max_per_class=300)
     classes:                # 15 picked synsets
       - {name: tabby_cat,          wnid: n02123045}
       - {name: labrador_retriever, wnid: n02099712}
@@ -61,7 +61,7 @@ conditions:
 hf:
   dataset_repo: "EricY05/lvlm-ood-fake-data"   # private HF dataset for the images
   private: true
-  revision: null          # pin a commit sha here for byte-exact reruns (null=latest)
+  revision: "05cfa5e86ec4eb86c696618792fdaf69f3d2611a"   # full snapshot (4500 ID + 3000 OOD + 1200 fake)
 
 # ---- result upload (code repo, dedicated branch) ----------------------------
 upload:
