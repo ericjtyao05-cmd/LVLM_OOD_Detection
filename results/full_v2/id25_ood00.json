@@ -1,0 +1,40 @@
+{
+  "condition": "id25_ood00",
+  "n": {
+    "id_test": 900,
+    "ood_test": 3000,
+    "fake_probe": 500
+  },
+  "methods": {
+    "msp": {
+      "auroc_ood": 0.97329,
+      "fpr95_ood": 0.03111111111111111,
+      "auroc_fake": 0.8988133333333334,
+      "fpr95_fake": 1.0,
+      "auroc_fake_whoops": 0.9001450708869106,
+      "fpr95_fake_whoops": 1.0,
+      "auroc_fake_gen": 0.8960599863667348,
+      "fpr95_fake_gen": 1.0
+    },
+    "energy": {
+      "auroc_ood": 0.9920155555555555,
+      "fpr95_ood": 0.01,
+      "auroc_fake": 0.9683155555555556,
+      "fpr95_fake": 0.19777777777777777,
+      "auroc_fake_whoops": 0.9688229475766568,
+      "fpr95_fake_whoops": 0.14888888888888888,
+      "auroc_fake_gen": 0.967266530334015,
+      "fpr95_fake_gen": 0.2788888888888889
+    },
+    "mahalanobis": {
+      "auroc_ood": 0.9878685185185185,
+      "fpr95_ood": 0.016666666666666666,
+      "auroc_fake": 0.9851533333333333,
+      "fpr95_fake": 0.07333333333333333,
+      "auroc_fake_whoops": 0.9889086712825585,
+      "fpr95_fake_whoops": 0.058888888888888886,
+      "auroc_fake_gen": 0.9773892297205181,
+      "fpr95_fake_gen": 0.11777777777777777
+    }
+  }
+}
