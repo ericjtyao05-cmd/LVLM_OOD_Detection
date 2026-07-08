@@ -1,0 +1,40 @@
+{
+  "condition": "id01_ood00",
+  "n": {
+    "id_test": 900,
+    "ood_test": 3000,
+    "fake_probe": 500
+  },
+  "methods": {
+    "msp": {
+      "auroc_ood": 0.5,
+      "fpr95_ood": 1.0,
+      "auroc_fake": 0.5,
+      "fpr95_fake": 1.0,
+      "auroc_fake_whoops": 0.5,
+      "fpr95_fake_whoops": 1.0,
+      "auroc_fake_gen": 0.5,
+      "fpr95_fake_gen": 1.0
+    },
+    "energy": {
+      "auroc_ood": 0.9270646296296297,
+      "fpr95_ood": 0.41555555555555557,
+      "auroc_fake": 0.7570688888888889,
+      "fpr95_fake": 0.8155555555555556,
+      "auroc_fake_whoops": 0.7843570722057369,
+      "fpr95_fake_whoops": 0.7566666666666667,
+      "auroc_fake_gen": 0.7006509884117246,
+      "fpr95_fake_gen": 0.8322222222222222
+    },
+    "mahalanobis": {
+      "auroc_ood": 0.9887733333333333,
+      "fpr95_ood": 0.015555555555555555,
+      "auroc_fake": 0.9877,
+      "fpr95_fake": 0.06222222222222222,
+      "auroc_fake_whoops": 0.9903956478733926,
+      "fpr95_fake_whoops": 0.052222222222222225,
+      "auroc_fake_gen": 0.9821267893660531,
+      "fpr95_fake_gen": 0.11888888888888889
+    }
+  }
+}
