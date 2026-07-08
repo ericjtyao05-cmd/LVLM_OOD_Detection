@@ -34,25 +34,52 @@ def read_manifest(path: Path):
 
 
 class FeatureCache:
-    """Caches per-image {hidden, logits} so repeated images aren't recomputed."""
+    """Caches per-image hidden states (by path) so repeats aren't recomputed."""
     def __init__(self, model):
         self.model = model
         self.h: dict[str, np.ndarray] = {}
-        self.l: dict[str, np.ndarray] = {}
 
     def features_for(self, rows):
-        from PIL import Image
         paths = [r["path"] for r in rows]
         todo = [p for p in paths if p not in self.h]
         if todo:
-            imgs = [Image.open(p).convert("RGB") for p in todo]
-            out = self.model.extract(imgs)
+            out = self.model.extract(todo)          # paths -> hidden (parallel)
             for i, p in enumerate(todo):
                 self.h[p] = out["hidden"][i]
-                self.l[p] = out["logits"][i]
-        H = np.stack([self.h[p] for p in paths])
-        L = np.stack([self.l[p] for p in paths])
-        return H, L
+        return np.stack([self.h[p] for p in paths])
+
+
+def train_probe(H_train, y_train, n_classes, epochs=150, lr=1e-2):
+    """Linear probe (multinomial logistic) on ID-train hidden states, in torch.
+
+    Gives well-defined C-way logits for MSP/Energy -- the raw class-token logits
+    were near-constant (MSP collapsed to AUROC 0.5). Trained on ID only, so it's a
+    legitimate post-hoc OOD setup. Pure torch (no sklearn dep). Runs on CPU to
+    avoid contending with the resident LLaVA model on GPU. Features are
+    standardized (fit on train) for stable convergence.
+    Returns a function hidden -> logits[N,C].
+    """
+    import torch
+    import torch.nn.functional as F
+    X = torch.as_tensor(np.asarray(H_train), dtype=torch.float32)
+    y = torch.as_tensor(np.asarray(y_train), dtype=torch.long)
+    mu = X.mean(0, keepdim=True)
+    sd = X.std(0, keepdim=True) + 1e-6
+    Xn = (X - mu) / sd
+    head = torch.nn.Linear(X.shape[1], n_classes)
+    opt = torch.optim.Adam(head.parameters(), lr=lr, weight_decay=1e-4)
+    for _ in range(epochs):
+        opt.zero_grad()
+        F.cross_entropy(head(Xn), y).backward()
+        opt.step()
+    head.eval()
+    W = head.weight.detach(); b = head.bias.detach()
+
+    def logits(H):
+        h = (torch.as_tensor(np.asarray(H), dtype=torch.float32) - mu) / sd
+        with torch.no_grad():
+            return (h @ W.t() + b).numpy()
+    return logits
 
 
 def score_condition(cdir: Path, cache: FeatureCache, methods, n_classes):
@@ -61,13 +88,15 @@ def score_condition(cdir: Path, cache: FeatureCache, methods, n_classes):
     ood = read_manifest(cdir / "ood_test.csv")
     fake = read_manifest(cdir / "fake_probe.csv")
 
-    Htr, _ = cache.features_for(tr)
+    Htr = cache.features_for(tr)
     ytr = np.array([int(r["label"]) for r in tr])
-    Hid, Lid = cache.features_for(idt)
-    Hood, Lood = cache.features_for(ood)
-    Hfk, Lfk = cache.features_for(fake)
+    Hid = cache.features_for(idt)
+    Hood = cache.features_for(ood)
+    Hfk = cache.features_for(fake)
 
-    stats = fit_stats(Htr, ytr, n_classes)
+    stats = fit_stats(Htr, ytr, n_classes)     # Mahalanobis (raw hidden states)
+    probe = train_probe(Htr, ytr, n_classes)   # MSP/Energy logits
+    Lid, Lood, Lfk = probe(Hid), probe(Hood), probe(Hfk)
 
     # split fake_probe by source for the artifact-vs-impossibility confound check
     is_whoops = np.array(["whoops" in Path(r["path"]).name for r in fake])
