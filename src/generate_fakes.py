@@ -35,22 +35,26 @@ ANIMAL_CLASSES = {
     "african_elephant", "zebra", "tiger", "brown_bear", "ostrich",
 }
 
-# Unambiguously-impossible transformations, kept photoreal.
+# Templates chosen from SDXL sample tests (docs/DESIGN.md notes the failures):
+#  - "attached wings" reliably render; creature/insect wings (bat, dragon,
+#    butterfly) on OBJECTS spawn a *separate* creature instead of attaching,
+#    so objects use FEATHERED wings only, varied by colour + setting.
+#  - Counts ("five heads"), cross-category limbs ("chicken legs"), and bare
+#    scale ("skyscraper-sized") failed -> dropped. Scale works only with an
+#    in-frame reference (cars/people) and only for non-large subjects (animals).
 ANIMAL_TEMPLATES = [
-    "a {c} with enormous feathered wings, flying high above the rooftops",
-    "a {c} with five heads, every head clearly visible",
-    "a {c} with eight long spider legs",
-    "a {c} the size of a skyscraper towering over a city, tiny people fleeing below",
-    "a {c} with a dozen tails fanned out",
-    "a {c} with a long elephant trunk and giant bat wings",
+    "a {c} with enormous feathered eagle wings, flying high above the city",
+    "a {c} with large black leathery bat wings, flying at dusk",
+    "a {c} with huge colorful monarch butterfly wings, in a sunny garden",
+    "a {c} with two pairs of large feathered wings, four wings total, flying above the rooftops",
+    "a giant {c} looming over tiny cars and terrified people on a city street, immense scale",
 ]
 OBJECT_TEMPLATES = [
-    "a {c} with giant feathered wings, flapping as it flies over the city",
-    "a {c} walking on four giant chicken legs instead of wheels",
-    "a {c} the size of a skyscraper towering over a tiny city, people fleeing",
-    "a {c} with giant crab claws and octopus tentacles sprouting from its sides",
-    "a {c} with dozens of human legs underneath, walking down the street",
-    "a {c} covered in hundreds of blinking eyes",
+    "a {c} with enormous brown feathered wings, flying high over the city",
+    "a {c} with huge white feathered angel wings, flying above the clouds",
+    "a {c} with large black feathered wings, flying through a stormy night sky",
+    "a {c} with golden feathered wings, flying over snowy mountains at sunrise",
+    "a {c} with many feathered wings along its sides, flying through a bright blue sky",
 ]
 
 # Appended to every prompt for photoreal quality.
