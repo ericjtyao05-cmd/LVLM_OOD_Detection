@@ -42,20 +42,22 @@ data:
     max_per_class: 300
     test_frac: 0.2
   ood_real:
-    source: dtd             # Describable Textures (torchvision, no login)
+    source: dtd             # Describable Textures (HF mirror, no login)
     size: 3000
   fake:
-    whoops:        {enabled: true,  limit: 500}     # human-curated impossible imgs
-    sdxl_aligned:  {enabled: true,  n_per_class: 60}  # category-aligned (ID contamination)
-    sdxl_freeform: {enabled: true,  n: 500}         # generic impossible (OOD/probe)
+    # Contaminant pool ONLY (injected into id_train; NEVER into test sets).
+    # All fakes are AI-generated -- incl. WHOOPS! (Midjourney/DALL-E/SD), so
+    # real-vs-fake test comparisons are confounded and deliberately not run.
+    sdxl_aligned:  {enabled: true,  n_per_class: 60}  # category-aligned contaminants
+    whoops:        {enabled: false, limit: 500}       # reserved for future controls
+    sdxl_freeform: {enabled: false, n: 500}           # reserved for future controls
 
-# ---- experiment grid (mixing pipeline) --------------------------------------
+# ---- experiment sweep (mixing pipeline) --------------------------------------
+# One condition = one ID-training contamination ratio. Test sets (clean real
+# id_test + clean real ood_test) are identical across conditions -- guardrail.
 conditions:
   id_fake_ratios:  [0.0, 0.01, 0.10, 0.25]
-  ood_fake_ratios: [0.0, 0.01, 0.10, 0.25]
-  grid: families          # "families" (10 conds) or "full" (16)
   ood_test_size: 3000
-  fake_probe_size: 500
 
 # ---- dataset snapshot on HuggingFace (private; images live here, not in git) -
 hf:

@@ -1,0 +1,116 @@
+{
+  "model": "llava-1.5-7b",
+  "methods": [
+    "msp",
+    "energy",
+    "mahalanobis"
+  ],
+  "classes": [
+    "african_elephant",
+    "airliner",
+    "bald_eagle",
+    "brown_bear",
+    "goldfish",
+    "grand_piano",
+    "labrador_retriever",
+    "mountain_bike",
+    "ostrich",
+    "school_bus",
+    "sports_car",
+    "steam_locomotive",
+    "tabby_cat",
+    "tiger",
+    "zebra"
+  ],
+  "note": "Cleaned extraction from run full_v2 (2026-07-08). Kept ONLY the valid design: contaminated id_train, CLEAN real id_test vs CLEAN real ood_test (the *_ood00 conditions). All fake-containing test metrics (fake_probe / ood-test contamination) were retracted: every fake pool incl. WHOOPS! is AI-generated, so real-vs-fake separation is confounded (AI-artifact vs impossibility) and unsupported.",
+  "conditions": [
+    {
+      "condition": "id00",
+      "n": {
+        "id_test": 900,
+        "ood_test": 3000
+      },
+      "id_acc": null,
+      "methods": {
+        "msp": {
+          "auroc_ood": 0.9697842592592593,
+          "fpr95_ood": 0.03111111111111111
+        },
+        "energy": {
+          "auroc_ood": 0.9931792592592592,
+          "fpr95_ood": 0.012222222222222223
+        },
+        "mahalanobis": {
+          "auroc_ood": 0.9888625925925926,
+          "fpr95_ood": 0.015555555555555555
+        }
+      }
+    },
+    {
+      "condition": "id01",
+      "n": {
+        "id_test": 900,
+        "ood_test": 3000
+      },
+      "id_acc": null,
+      "methods": {
+        "msp": {
+          "auroc_ood": 0.9713455555555556,
+          "fpr95_ood": 0.03111111111111111
+        },
+        "energy": {
+          "auroc_ood": 0.9925474074074074,
+          "fpr95_ood": 0.011111111111111112
+        },
+        "mahalanobis": {
+          "auroc_ood": 0.9887733333333333,
+          "fpr95_ood": 0.015555555555555555
+        }
+      }
+    },
+    {
+      "condition": "id10",
+      "n": {
+        "id_test": 900,
+        "ood_test": 3000
+      },
+      "id_acc": null,
+      "methods": {
+        "msp": {
+          "auroc_ood": 0.972197962962963,
+          "fpr95_ood": 0.016666666666666666
+        },
+        "energy": {
+          "auroc_ood": 0.9927014814814815,
+          "fpr95_ood": 0.014444444444444444
+        },
+        "mahalanobis": {
+          "auroc_ood": 0.9886681481481482,
+          "fpr95_ood": 0.016666666666666666
+        }
+      }
+    },
+    {
+      "condition": "id25",
+      "n": {
+        "id_test": 900,
+        "ood_test": 3000
+      },
+      "id_acc": null,
+      "methods": {
+        "msp": {
+          "auroc_ood": 0.97329,
+          "fpr95_ood": 0.03111111111111111
+        },
+        "energy": {
+          "auroc_ood": 0.9920155555555555,
+          "fpr95_ood": 0.01
+        },
+        "mahalanobis": {
+          "auroc_ood": 0.9878685185185185,
+          "fpr95_ood": 0.016666666666666666
+        }
+      }
+    }
+  ]
+}
