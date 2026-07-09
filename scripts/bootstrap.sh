@@ -39,7 +39,7 @@ else
   python -m src.prepare_data --config "$CONFIG"
   # Contaminant pool: category-aligned fakes only (injected into id_train;
   # test sets always stay clean real -- design guardrail).
-  python src/generate_fakes.py aligned --n-per-class 25 --out data/fake_id \
+  python src/generate_fakes.py aligned --n-per-class 240 --batch-size 8 --out data/fake_id \
     --classes tabby_cat labrador_retriever goldfish bald_eagle african_elephant \
               zebra tiger brown_bear ostrich sports_car school_bus airliner \
               mountain_bike grand_piano steam_locomotive || log "WARN aligned fakes skipped"
