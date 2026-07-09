@@ -37,11 +37,12 @@ if [ "$REUSE" = "true" ]; then
 else
   log "reuse=false -> building dataset"
   python -m src.prepare_data --config "$CONFIG"
+  # Contaminant pool: category-aligned fakes only (injected into id_train;
+  # test sets always stay clean real -- design guardrail).
   python src/generate_fakes.py aligned --n-per-class 25 --out data/fake_id \
     --classes tabby_cat labrador_retriever goldfish bald_eagle african_elephant \
               zebra tiger brown_bear ostrich sports_car school_bus airliner \
               mountain_bike grand_piano steam_locomotive || log "WARN aligned fakes skipped"
-  python src/generate_fakes.py freeform --n 200 --out data/fake_ood || log "WARN freeform skipped"
   log "pushing dataset snapshot to HF (private)"
   python -m src.dataset_hub push --config "$CONFIG"    # prints revision to pin
 fi

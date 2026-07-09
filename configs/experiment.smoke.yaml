@@ -36,17 +36,13 @@ data:
     source: dtd
     size: 1500
   fake:
-    whoops:        {enabled: true,  limit: 500}
+    # Contaminant pool ONLY (id_train); test sets stay clean real.
     sdxl_aligned:  {enabled: true,  n_per_class: 25}
-    sdxl_freeform: {enabled: true,  n: 200}
+    whoops:        {enabled: false, limit: 500}   # reserved for future controls
+    sdxl_freeform: {enabled: false, n: 200}       # reserved for future controls
 conditions:
-  # ID-contamination axis needs category-aligned SDXL fakes (data/fake_id),
-  # deferred until diffusers/torch fixed -> keep [0.0] for this OOD-axis run.
-  id_fake_ratios:  [0.0]
-  ood_fake_ratios: [0.0, 0.01, 0.10, 0.25]
-  grid: families
+  id_fake_ratios:  [0.0, 0.10, 0.25]
   ood_test_size: 1500
-  fake_probe_size: 400
 hf:
   dataset_repo: "EricY05/lvlm-ood-fake-data"
   private: true

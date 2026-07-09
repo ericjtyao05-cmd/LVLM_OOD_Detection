@@ -1,10 +1,13 @@
 """Turn results/<run>/summary.json into paper-ready artifacts.
 
+The experiment is a 1-D sweep: ID-training contamination % -> real-vs-real OOD
+detection (AUROC/FPR95 per detector) + clean-ID accuracy.
+
 Outputs (under --out):
-  table_main.csv   long-form table of every metric
-  table_main.tex   booktabs LaTeX table (AUROC/FPR95, ood & fake) per condition
-  heatmap_<method>_fake.{png,pdf}   AUROC(fake) over the id x ood contamination grid
-  heatmap_<method>_ood.{png,pdf}    AUROC(ood)  over the same grid
+  table_main.csv    long-form table of every metric
+  table_main.tex    booktabs LaTeX table
+  sweep_auroc.{png,pdf}   AUROC(ood) vs contamination %, one line per detector
+  sweep_fpr95.{png,pdf}   FPR95(ood) vs contamination %
 """
 
 from __future__ import annotations
@@ -15,97 +18,92 @@ import json
 import re
 from pathlib import Path
 
-import numpy as np
-
-COND_RE = re.compile(r"id(\d+)_ood(\d+)")
+COND_RE = re.compile(r"id(\d+)(?:_ood00)?")   # accepts legacy id00_ood00 names
 
 
-def parse_cond(name):
+def parse_pct(name: str):
     m = COND_RE.fullmatch(name)
-    return (int(m.group(1)), int(m.group(2))) if m else (None, None)
+    return int(m.group(1)) if m else None
 
 
 def load_summary(results_dir: Path) -> dict:
     return json.load(open(results_dir / "summary.json"))
 
 
-def write_csv(summary, out: Path):
+def _rows(summary):
     rows = []
     for res in summary["conditions"]:
-        idp, oodp = parse_cond(res["condition"])
+        pct = parse_pct(res["condition"])
+        if pct is None:
+            continue
         for m, rec in res["methods"].items():
-            row = {"condition": res["condition"], "id_fake_pct": idp,
-                   "ood_fake_pct": oodp, "method": m, **rec}
-            rows.append(row)
+            rows.append({"condition": res["condition"], "id_fake_pct": pct,
+                         "method": m, "id_acc": res.get("id_acc"), **rec})
+    return sorted(rows, key=lambda r: (r["id_fake_pct"], r["method"]))
+
+
+def write_csv(summary, out: Path):
+    rows = _rows(summary)
     if not rows:
         return
-    keys = list(rows[0].keys())
     with open(out / "table_main.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=keys)
+        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader(); w.writerows(rows)
 
 
 def write_latex(summary, out: Path):
     methods = summary["methods"]
+    conds = [c for c in summary["conditions"] if parse_pct(c["condition"]) is not None]
+    conds.sort(key=lambda c: parse_pct(c["condition"]))
     lines = [r"\begin{table}[t]\centering",
-             r"\caption{OOD (real novel classes) vs.\ fake (physically-impossible) "
-             r"detection across fake-contamination conditions. "
-             r"AUROC$\uparrow$ / FPR95$\downarrow$.}",
-             r"\label{tab:main}",
-             r"\resizebox{\linewidth}{!}{%",
-             r"\begin{tabular}{l" + "cccc" * len(methods) + "}",
+             r"\caption{Effect of ID-training contamination with AI-generated "
+             r"impossible images on \emph{real-vs-real} OOD detection. Test sets "
+             r"are clean real images, identical across conditions. "
+             r"AUROC$\uparrow$ / FPR95$\downarrow$; ID acc$\uparrow$.}",
+             r"\label{tab:contamination}",
+             r"\begin{tabular}{lc" + "cc" * len(methods) + "}",
              r"\toprule"]
-    head = ["Condition"]
+    head = ["ID fake \\%", "ID acc"]
     for m in methods:
-        head += [f"\\multicolumn{{4}}{{c}}{{{m}}}"]
+        head.append(f"\\multicolumn{{2}}{{c}}{{{m}}}")
     lines.append(" & ".join(head) + r" \\")
-    sub = [""] + ["AUC$_{ood}$", "FPR$_{ood}$", "AUC$_{fk}$", "FPR$_{fk}$"] * len(methods)
+    sub = ["", ""] + ["AUC", "FPR95"] * len(methods)
     lines.append(" & ".join(sub) + r" \\ \midrule")
-    for res in summary["conditions"]:
-        cells = [res["condition"].replace("_", r"\_")]
+    for c in conds:
+        cells = [str(parse_pct(c["condition"])),
+                 f"{c.get('id_acc', float('nan')):.3f}" if c.get("id_acc") is not None else "--"]
         for m in methods:
-            r = res["methods"][m]
-            cells += [f"{r['auroc_ood']:.3f}", f"{r['fpr95_ood']:.3f}",
-                      f"{r['auroc_fake']:.3f}", f"{r['fpr95_fake']:.3f}"]
+            r = c["methods"][m]
+            cells += [f"{r['auroc_ood']:.3f}", f"{r['fpr95_ood']:.3f}"]
         lines.append(" & ".join(cells) + r" \\")
-    lines += [r"\bottomrule", r"\end{tabular}}", r"\end{table}"]
+    lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
     (out / "table_main.tex").write_text("\n".join(lines))
 
 
-def heatmaps(summary, out: Path):
+def sweeps(summary, out: Path):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    conds = summary["conditions"]
-    ids = sorted({parse_cond(c["condition"])[0] for c in conds})
-    oods = sorted({parse_cond(c["condition"])[1] for c in conds})
-    lookup = {c["condition"]: c["methods"] for c in conds}
+    conds = [c for c in summary["conditions"] if parse_pct(c["condition"]) is not None]
+    conds.sort(key=lambda c: parse_pct(c["condition"]))
+    pcts = [parse_pct(c["condition"]) for c in conds]
 
-    for m in summary["methods"]:
-        for axis, key in (("fake", "auroc_fake"), ("ood", "auroc_ood")):
-            grid = np.full((len(ids), len(oods)), np.nan)
-            for i, a in enumerate(ids):
-                for j, b in enumerate(oods):
-                    name = f"id{a:02d}_ood{b:02d}"
-                    if name in lookup and m in lookup[name]:
-                        grid[i, j] = lookup[name][m].get(key, np.nan)
-            fig, ax = plt.subplots(figsize=(4, 3.2))
-            im = ax.imshow(grid, vmin=0.5, vmax=1.0, cmap="viridis", aspect="auto")
-            ax.set_xticks(range(len(oods))); ax.set_xticklabels([f"{b}%" for b in oods])
-            ax.set_yticks(range(len(ids))); ax.set_yticklabels([f"{a}%" for a in ids])
-            ax.set_xlabel("OOD fake %"); ax.set_ylabel("ID fake %")
-            ax.set_title(f"{m}: AUROC ({axis})")
-            for i in range(len(ids)):
-                for j in range(len(oods)):
-                    if not np.isnan(grid[i, j]):
-                        ax.text(j, i, f"{grid[i, j]:.2f}", ha="center", va="center",
-                                color="w", fontsize=8)
-            fig.colorbar(im, ax=ax, fraction=0.046)
-            fig.tight_layout()
-            for ext in ("png", "pdf"):
-                fig.savefig(out / f"heatmap_{m}_{axis}.{ext}", dpi=150)
-            plt.close(fig)
+    for key, label, fname in (("auroc_ood", "AUROC (real ID vs real OOD)", "sweep_auroc"),
+                              ("fpr95_ood", "FPR95 (real ID vs real OOD)", "sweep_fpr95")):
+        fig, ax = plt.subplots(figsize=(4.6, 3.2))
+        for m in summary["methods"]:
+            ys = [c["methods"][m][key] for c in conds]
+            ax.plot(pcts, ys, marker="o", label=m)
+        ax.set_xlabel("ID-training fake contamination (%)")
+        ax.set_ylabel(label)
+        ax.set_xticks(pcts)
+        ax.grid(alpha=0.25)
+        ax.legend(frameon=False, fontsize=8)
+        fig.tight_layout()
+        for ext in ("png", "pdf"):
+            fig.savefig(out / f"{fname}.{ext}", dpi=150)
+        plt.close(fig)
 
 
 def main():
@@ -117,8 +115,8 @@ def main():
     summary = load_summary(Path(args.results))
     write_csv(summary, out)
     write_latex(summary, out)
-    heatmaps(summary, out)
-    print(f"[paperize] wrote table_main.csv/.tex + heatmaps -> {out}/")
+    sweeps(summary, out)
+    print(f"[paperize] wrote table_main.csv/.tex + sweep plots -> {out}/")
 
 
 if __name__ == "__main__":

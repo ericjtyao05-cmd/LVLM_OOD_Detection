@@ -1,6 +1,9 @@
 # Onboarding guide — get running on a rented GPU in ~30 min
 
-For a new collaborator joining the LVLM-OOD-vs-fake project. The happy path
+For a new collaborator joining the training-contamination study: *does mixing
+fake (AI-generated, physically-impossible) images into the ID training set hurt
+an LVLM OOD detector's real-vs-real performance?* Test sets are always clean
+real images — see [DESIGN.md](DESIGN.md) before changing anything. The happy path
 **reuses the prebuilt dataset** (no rebuild), so you go from zero to results fast.
 Deeper vast.ai detail lives in [vast_ai_guide.md](vast_ai_guide.md).
 
@@ -96,7 +99,8 @@ export VAST_API_KEY=...   # laptop only
 ## 8. Change what you run (no pipeline edits)
 Everything swappable is in `configs/experiment.yaml`:
 - **Detectors:** `detector.methods: [msp, energy, mahalanobis]` — add/remove a name.
-- **Conditions:** `conditions.id_fake_ratios` / `ood_fake_ratios`.
+- **Conditions:** `conditions.id_fake_ratios` — the ID-training contamination
+  sweep. (There is no test-side fake axis by design; test sets stay clean real.)
 - **Model:** `model.name` (a second LVLM registers in `src/models/` and is selected by its key).
 
 ## Common snags (all pre-solved in the code, listed so you recognise them)

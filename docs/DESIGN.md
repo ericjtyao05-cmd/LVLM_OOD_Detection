@@ -1,157 +1,131 @@
-# Can ViT-based OOD detectors catch *fake* images? — Experiment Design
+# Does fake-image contamination of the training set hurt OOD detection? — Design
 
 ## 1. Research question
 
-Classical Out-of-Distribution (OOD) detection asks: *is this test image from a
-semantic class the model was trained on?* OOD samples are usually **real** images
-of **novel categories** (e.g. train on ImageNet animals, test with textures).
+Training data increasingly contains AI-generated and physically-impossible
+images scraped from the web. We ask:
 
-We ask a different question, orthogonal to the usual one:
+> If a fraction of an LVLM-based OOD detector's **ID training set** is replaced
+> by fake (physically-impossible, AI-generated) images — a cat with wings
+> labelled "cat" — does the detector get worse at its actual job: separating
+> **real ID** images from **real OOD** images?
 
-> When a test image is *semantically familiar* but **physically impossible**
-> (a cat **with wings**, a floating waterfall, Godzilla), do existing OOD
-> detectors flag it? Or does "impossibility" live in a blind spot?
+**Design guardrail (the core of the study):** contamination happens **only in
+training**. The test sets — clean real `id_test` vs clean real `ood_test` — are
+**identical across all conditions**. The dependent variables are real-vs-real
+OOD detection (AUROC/FPR95) and clean-ID classification accuracy. Nothing is
+ever measured against a fake-containing test set.
 
-This connects to **Physical AI / physical plausibility**: a model may recognize
-"cat" with high confidence and therefore call the winged cat *in-distribution*,
-even though no such thing exists in reality. We measure whether standard scores
-(MSP, Energy, KNN) separate real-ID from fake images, and how that separation
-**degrades under contamination** of the ID or OOD pools with fakes.
-
-**Scope note (model).** The topic is **LVLM-based** OOD detection, so the model is
-a large vision-language model, not a vision-only encoder. Default = **LLaVA-1.5-7B**:
-open weights, hidden states exposed via HF `transformers` (`output_hidden_states=True`),
-and it fits a single 4090 (fp16 ≈14 GB, inference-only). The detector reads the
-model's **internals** — the last-token hidden state and class-restricted next-token
-logits — so model and method are coupled (see §4). Model is swappable via
-`configs/experiment.yaml` (`model.name`); a second LVLM (Qwen2-VL-2B) is the
-planned ablation. Prompt-/generation-based LVLM-OOD methods (ReGuide) are a
-separate family we treat as a Phase-2 comparison, not the hidden-state baseline.
+### Retracted: the "fake detection" framing
+An earlier revision also injected fakes into the OOD *test* set and measured
+detection of a 100%-fake probe ("can LVLMs flag impossibility?"). That framing
+is **confounded and was retracted**: every available fake pool — including
+WHOOPS!, whose images are created by designers *with Midjourney/DALL-E/Stable
+Diffusion* (it is a *synthetic*-image benchmark) — is AI-generated, while the
+ID/OOD pools are real photos. Real-vs-fake separation therefore cannot be
+attributed to *impossibility* rather than *AI-generation artifacts*. Answering
+the impossibility question requires an AI-generated-but-*possible* control set
+(future work, §6). The current study is immune to this confound because its
+test comparison is real-vs-real.
 
 ## 2. Variables
 
-| Axis | Meaning | Values |
-|------|---------|--------|
-| `id_fake_ratio`  | fraction of the **ID training** pool replaced by category-aligned fakes (winged cat labelled "cat") | 0, 0.01, 0.10, 0.25 |
-| `ood_fake_ratio` | fraction of the **OOD test** set that is fake | 0, 0.01, 0.10, 0.25 |
+| | |
+|---|---|
+| **Independent** | `id_fake_ratio` ∈ {0, 0.01, 0.10, 0.25} — fraction of the ID training set replaced (not added) by category-aligned fakes |
+| **Dependent** | `auroc_ood` / `fpr95_ood` (clean real ID vs clean real OOD), `id_acc` (probe accuracy on clean ID) |
+| **Fixed** | model, detectors, prompt, test sets, seed |
 
-The four requested families are points on this 2-D grid:
+One condition = one ratio → 4 conditions: `id00`, `id01`, `id10`, `id25`.
+Replacement (not addition) keeps the training set size constant across
+conditions.
 
-```
-Family 1  baseline      (id=0,   ood=0)
-Family 2  ID fake       (id=r,   ood=0)     r∈{.01,.10,.25}
-Family 3  OOD fake      (id=0,   ood=r)
-Family 4  both (matched) (id=r,  ood=r)
-```
+## 3. Data
 
-Total = **1 + 3 + 3 + 3 = 10 conditions** (`grid: "families"`), or the full
-4×4 = 16 cross-product with `grid: "full"`.
+| Pool | Source | Size | Role |
+|---|---|---|---|
+| Real ID | ImageNet-1k (gated), 15 concrete classes, 300/class | 4500 | train (contaminated) + clean test |
+| Real OOD | Describable Textures (DTD) | 3000 | clean test only |
+| Contaminants | SDXL **category-aligned** fakes (impossible variants of each ID class: winged, giant, transparent, two-headed, …) | 30/class | injected into `id_train` only |
 
-To keep AUROC comparable across conditions we **replace** rather than add, so set
-sizes stay constant. Every condition also emits two *fixed* diagnostic sets:
+Category alignment matters: the contaminant must plausibly carry the class
+label (an impossible *cat* labelled "cat"), otherwise it is generic label noise
+rather than the contamination scenario we care about.
 
-* `id_test`    — clean real ID images (never contaminated), the reference.
-* `fake_probe` — 100%-fake test set. **`id_test` vs `fake_probe` AUROC is the
-  headline number**: it answers "can this detector flag impossibility at all?"
+WHOOPS! and SDXL freeform images remain in the data snapshot but are **not used
+in the current design** (reserved for future controls; see §6).
 
-## 3. Datasets (small but meaningful first baseline)
+Images live in a **private HF dataset** (`EricY05/lvlm-ood-fake-data`, pinned
+`revision`) — private because ImageNet redistribution is restricted. The split
+**manifests** (CSV path lists) are committed to git; pinned revision ×
+committed manifests = byte-exact reruns.
 
-### Real ID — ImageNet-200 subset (recommended) or a 10–20 class mini-set
-* Use the **ImageNet-200** class list from OpenOOD, or a hand-picked 10–20
-  "concrete object" classes that have plausible impossible variants
-  (cat, dog, bird, horse, elephant, car, …). Cap at `max_per_class: 300`
-  → ~3–6k images. High-res natural photos match the fakes' domain.
-* Why not CIFAR? 32×32 doesn't match photorealistic fakes (domain gap would
-  confound the fake signal). Use 224×224 natural images.
+## 4. Model & detectors
 
-### Real OOD — standard far-OOD sets
-* Any of OpenOOD's far-OOD sets: **iNaturalist**, **SUN**, **Places**,
-  **Textures (DTD)**, **OpenImage-O**. Start with one (e.g. iNaturalist or
-  Textures) capped at `ood_test_size: 3000`.
+**Model:** LLaVA-1.5-7B (open LVLM; hidden states via HF `transformers`; fits a
+24 GB 4090 in fp16, inference-only). One forward pass per image with the prompt
+*"What is the main object in this image? Answer with a single word."* yields the
+last-token hidden state.
 
-### Fake images — two complementary sources
-1. **WHOOPS!** (Bitton-Guetta et al., ICCV 2023) — ~500 *human-curated*
-   commonsense-defying / physically-impossible images. HF `nlphuji/whoops`.
-   This is the gold anchor for `fake_ood` / `fake_probe`.
-   → `python src/prepare_sources.py whoops --out data/fake_ood`
-2. **SDXL-generated** (`src/generate_fakes.py`) — for **scale** and **category
-   alignment** (fakes that belong to an ID class, needed for `id_fake_ratio`):
-   * `aligned`  → `data/fake_id/<class>/` (winged cat, giant dog, …)
-   * `freeform` → `data/fake_ood/` (Godzilla, upward waterfall, …)
+**Detectors** (all post-hoc; all fit **only** on the — possibly contaminated —
+ID training set):
 
-> Keep a held-out **human-curated (WHOOPS-only)** fake test split so the headline
-> result isn't just "detect SDXL artifacts". Report generated-fake and
-> WHOOPS-fake AUROC separately — if they differ a lot, the detector is keying on
-> generation artifacts, not impossibility. This is the key confound to control.
+* **MSP** (Hendrycks & Gimpel 2017) — max softmax of a linear probe trained on
+  ID-train hidden states. The canonical baseline.
+* **Energy** (Liu et al. 2020) — `−logsumexp` of the same probe logits.
+* **Mahalanobis** (Lee et al. 2018) — min class-conditional Mahalanobis distance
+  on raw hidden states (tied, shrinkage-regularised covariance).
 
-### Directory layout the pipeline expects
-```
-data/
-  id_real/<class>/*.jpg     # real ID, one folder per class
-  ood_real/*.jpg            # real OOD (flat)
-  fake_id/<class>/*.jpg     # category-aligned fakes (SDXL aligned)
-  fake_ood/*.jpg            # any fakes (WHOOPS + SDXL freeform)
-```
+The probe is used because LLaVA's raw next-token class logits are
+near-constant (MSP degenerates to AUROC 0.5 on them). Contamination reaches the
+detectors through the statistics they fit: class means/covariance
+(Mahalanobis) and probe weights (MSP/Energy).
 
-## 4. Method under test — read the LVLM's internals
+## 5. Result to date (run `contamination_v1`, cleaned from full_v2)
 
-One forward pass of LLaVA-1.5-7B per image yields two signals; all detectors are
-**post-hoc** (no OOD data at train time):
+Real-vs-real OOD AUROC is **flat under contamination up to 25%**:
 
-* **MSP** — Maximum Softmax Probability (Hendrycks & Gimpel, ICLR 2017), on the
-  next-token logits restricted to the ID class names. *The* canonical baseline.
-* **Energy** — Liu et al., NeurIPS 2020, on the same class-restricted logits.
-* **Mahalanobis** — Lee et al., NeurIPS 2018, on the **last-token hidden state**:
-  fit one Gaussian per ID class on ID-train hidden states, score by min class
-  distance. This is the *hidden-state* method — the one coupled to the LVLM — and
-  our headline "does impossibility live in the representation?" probe.
+| ID fake % | MSP | Energy | Mahalanobis |
+|---|---|---|---|
+| 0 | 0.970 | 0.993 | 0.989 |
+| 1 | 0.971 | 0.993 | 0.989 |
+| 10 | 0.972 | 0.993 | 0.989 |
+| 25 | 0.973 | 0.992 | 0.988 |
 
-Model↔method coupling is the point: the score is computed on *this* model's
-hidden states/logits, so swapping the LVLM re-computes everything. `src/detectors.py`
-registers all three; new scores (KNN, ViM, ReAct) drop into the same registry.
-Cross-reference **OpenOOD** for standardized method implementations.
+Interpretation and caveats live in `docs/REPORT.md`. Short version: post-hoc
+detectors are majority-driven robust estimators, and category-aligned fakes
+stay near their host class — so moderate contamination barely moves the fitted
+statistics. Single seed; `id_acc` not recorded in this run (now emitted by
+`run_all`).
 
-## 5. Metrics & expected reads
+## 6. What's missing / next experiments
 
-* **AUROC** (↑ better) and **FPR@95%TPR** (↓ better), computed for:
-  * `id_test` vs `ood_test`   — standard OOD performance (sanity).
-  * `id_test` vs `fake_probe` — **the fake-detection headline**.
-* Report each method across all 10 conditions as two heat-maps
-  (AUROC over the id×ood grid).
-
-Hypotheses to look for:
-* **H1** Fakes are *harder* than real-OOD: `AUROC(fake) < AUROC(ood)` at (0,0) —
-  impossibility is a blind spot because fakes stay near ID classes.
-* **H2** ID contamination hurts: AUROC drops as `id_fake_ratio` ↑ (the model
-  learns to *accept* impossible images as ID).
-* **H3** The hidden-state method (Mahalanobis) beats logit-only ones (MSP/Energy)
-  on fakes, or *doesn't* — either way that localizes *where* impossibility is (or
-  isn't) encoded: representation vs decision layer.
-
-## 6. Extensions (phase 2)
-
-* **Second LVLM (ablation):** Qwen2-VL-2B behind the same registry interface —
-  does a different LVLM expose impossibility better, and does scale matter?
-* **Prompt/generation-based method:** ReGuide-style — prompt the LVLM "Is this
-  image physically possible?" and use its reject-rate as the detector. Contrasts
-  a *reasoning* judge against the *hidden-state* scores (does explicit reasoning
-  catch fakes the representation misses?). Uses generation, so it complements —
-  not replaces — the hidden-state track.
+1. **Contamination-type controls** — same ratios with (a) real wrong-class
+   images (label noise) and (b) AI-generated *possible* images. Only this
+   comparison can say whether *impossible* contaminants are special.
+2. **A detector that can overfit** — fine-tune a head (or LoRA) on the
+   contaminated set; robust estimators may hide effects that learned ones show.
+3. **OOD-training contamination** — the original families 3–4 need an
+   outlier-exposure-style method that *trains on* OOD data; post-hoc methods
+   have no OOD-training slot.
+4. **Rigor** — multiple seeds (error bars), higher ratios (50/75%) to find a
+   breaking point, a second LVLM (Qwen2-VL) via the registry.
+5. **The impossibility question, done right** — an AI-possible control set
+   would de-confound real-vs-fake separation and revive the retracted question.
 
 ## 7. Run order
 
-**Automated (intended path):** set `GITHUB_TOKEN` + `HF_TOKEN` in the vast onstart
-field; `scripts/bootstrap.sh` does env → data → build → all conditions → upload →
-DONE, and `scripts/destroy_watcher.sh` tears the box down. See docs/vast_ai_guide.md.
+**Automated:** set `HF_TOKEN` + `GITHUB_TOKEN` on the box; `scripts/bootstrap.sh`
+does env → data (build+push HF, or pull pinned snapshot when `data.reuse: true`)
+→ manifests → run → push results to the git `results` branch.
 
-**Manual / local (for debugging a single stage):**
+**Manual:**
 ```bash
 pip install -r requirements.txt
-python -m src.prepare_data       --config configs/experiment.yaml   # ImageNet+DTD+WHOOPS
-python src/generate_fakes.py aligned  --classes tabby_cat ... --out data/fake_id   # GPU
-python src/generate_fakes.py freeform --n 500 --out data/fake_ood                  # GPU
+python -m src.prepare_data       --config configs/experiment.yaml
+python src/generate_fakes.py aligned --classes tabby_cat ... --out data/fake_id   # GPU
 python -m src.build_from_config  --config configs/experiment.yaml --out-dir manifests
 python -m src.run_all            --config configs/experiment.yaml --manifests manifests \
-                                 --results results/local
-python -m src.paperize           --results results/local --out results/local/paper
+                                 --results results/run1
+python -m src.paperize           --results results/run1 --out results/run1/paper
 ```

@@ -1,41 +1,36 @@
 #!/usr/bin/env python3
-"""Build mixed ID/OOD datasets with controllable fake-image contamination.
+"""Build ID-training-contamination manifests. TEST SETS ARE ALWAYS CLEAN.
 
 Research question
 -----------------
-Can existing ViT-based OOD detectors flag *physically-impossible* ("fake")
-images -- e.g. a cat with wings, or Godzilla? Fake images can be semantically
-close to in-distribution (ID) classes yet violate physical/common-sense reality.
+Does mixing fake (physically-impossible, AI-generated) images into the ID
+*training* set degrade a detector's ability to separate REAL ID from REAL OOD
+images?
 
-This script produces reproducible CSV *manifests* (it does NOT copy pixels) that
-downstream loaders (OpenOOD, or a plain torch Dataset) can consume. Fake images
-are injected along two independent axes:
+Design guardrail (do not change without revisiting the research question):
+  * Contamination happens ONLY in `id_train` -- the set detectors fit on.
+  * `id_test` and `ood_test` are ALWAYS clean real images, identical across
+    conditions. The dependent variable is real-vs-real OOD detection (and
+    clean-ID classification accuracy), never "fake detection".
+  * A condition = one contamination ratio. Nothing else varies.
 
-  * id_fake_ratio  : fraction of the ID *training* pool replaced by fake images
-                     (category-aligned fakes, e.g. a winged cat labelled "cat").
-  * ood_fake_ratio : fraction of the OOD *test* set replaced by fake images.
+(An earlier revision also injected fakes into the OOD test set and emitted a
+100%-fake probe. That drifted the study toward "can we detect fakes?", which is
+confounded -- all fake pools, including WHOOPS!, are AI-generated, so real-vs-
+fake separation cannot be attributed to impossibility. Removed on purpose.)
 
-Each (id_fake_ratio, ood_fake_ratio) pair is one experiment "condition". The
-four families requested map onto the (id, ood) grid:
+This script produces reproducible CSV *manifests* (paths only, no pixel copies):
 
-    Family 1 (baseline)  : (0.00, 0.00)
-    Family 2 (ID fake)   : (r, 0.00)      r in {0.01, 0.10, 0.25}
-    Family 3 (OOD fake)  : (0.00, r)      r in {0.01, 0.10, 0.25}
-    Family 4 (both)      : (r, r)         r in {0.01, 0.10, 0.25}  (matched)
-                           or full cross-product with --grid full
-
-Every condition also emits two *fixed* diagnostic test sets so results stay
-comparable across conditions:
-    id_test    : clean real ID test images (never contaminated)
-    fake_probe : 100%-fake test set (the headline "can we detect fakes?" probe)
+    manifests/<idNN>/id_train.csv   # (1-r) real + r category-aligned fakes
+    manifests/<idNN>/id_test.csv    # clean real ID   (fixed across conditions)
+    manifests/<idNN>/ood_test.csv   # clean real OOD  (fixed across conditions)
 
 Expected source layout (symlinks are fine)::
 
     data/
       id_real/<class_name>/*.jpg     # real ID images, one folder per class
       ood_real/*.jpg                 # real OOD images (flat; label ignored)
-      fake_id/<class_name>/*.jpg     # category-aligned fakes (SDXL-generated)
-      fake_ood/*.jpg                 # any fakes (WHOOPS! + generated), flat
+      fake_id/<class_name>/*.jpg     # category-aligned fakes (contaminant pool)
 
 Usage::
 
@@ -50,7 +45,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -90,12 +84,9 @@ def scan_flat_dir(root: Path) -> list[Path]:
 @dataclass
 class BuildConfig:
     id_fake_ratios: list[float] = field(default_factory=lambda: [0.0, 0.01, 0.10, 0.25])
-    ood_fake_ratios: list[float] = field(default_factory=lambda: [0.0, 0.01, 0.10, 0.25])
-    grid: str = "families"          # "families" (1+3+3+3) or "full" (cross-product)
     id_test_frac: float = 0.2       # held-out clean ID test fraction
     max_per_class: int | None = None  # cap ID images per class (speed)
     ood_test_size: int | None = None  # cap OOD test size (None = all)
-    fake_probe_size: int | None = 500  # size of the 100%-fake diagnostic set
     seed: int = 0
 
     @staticmethod
@@ -107,29 +98,8 @@ class BuildConfig:
         return BuildConfig(**raw)
 
 
-def enumerate_conditions(cfg: BuildConfig) -> list[tuple[float, float]]:
-    idr = sorted(set(cfg.id_fake_ratios))
-    oodr = sorted(set(cfg.ood_fake_ratios))
-    if cfg.grid == "full":
-        return [(a, b) for a in idr for b in oodr]
-    # "families": baseline + ID-only + OOD-only + matched-both
-    nz_id = [r for r in idr if r > 0]
-    nz_ood = [r for r in oodr if r > 0]
-    conds = [(0.0, 0.0)]
-    conds += [(r, 0.0) for r in nz_id]
-    conds += [(0.0, r) for r in nz_ood]
-    conds += [(r, r) for r in nz_id if r in nz_ood]
-    # de-dup preserving order
-    seen, out = set(), []
-    for c in conds:
-        if c not in seen:
-            seen.add(c)
-            out.append(c)
-    return out
-
-
 # --------------------------------------------------------------------------- #
-# Splitting & mixing
+# Splitting & contamination
 # --------------------------------------------------------------------------- #
 def split_id(id_real: dict[str, list[Path]], cfg: BuildConfig, rng: random.Random):
     """Per-class train/test split of real ID images (test is always clean)."""
@@ -149,8 +119,9 @@ def split_id(id_real: dict[str, list[Path]], cfg: BuildConfig, rng: random.Rando
 def contaminate_id_train(id_train, fake_id, ratio, rng):
     """Replace `ratio` of each class's train images with category-aligned fakes.
 
-    Returns list of (path, label, is_fake). Total size per class is preserved.
-    Falls back to a shared fake pool if a class has no aligned fakes.
+    Returns list of (path, label, is_fake). Total size per class is preserved
+    (replace, not add) so conditions stay size-matched. Falls back to a shared
+    fake pool if a class has no aligned fakes.
     """
     shared_fakes = [p for ps in fake_id.values() for p in ps]
     rows = []
@@ -163,34 +134,6 @@ def contaminate_id_train(id_train, fake_id, ratio, rng):
         fakes = [(pool[i % len(pool)], cls, 1) for i in range(n_fake)] if pool else []
         reals = [(p, cls, 0) for p in real[: n - len(fakes)]]
         rows.extend(reals + fakes)
-    rng.shuffle(rows)
-    return rows
-
-
-def build_ood_test(ood_real, fake_ood, ratio, size, rng):
-    """OOD test set = (1-ratio) real OOD + ratio fake OOD. Returns (path, is_fake).
-
-    The `ratio` is always honored exactly. Total size is `size` (or all real when
-    None), but is reduced if the real-OOD pool is too small to supply the
-    (1-ratio) real portion -- so ratios stay comparable across conditions instead
-    of silently inflating when real images run out. Fakes are cycled with
-    replacement, so they never limit size.
-    """
-    ood_real = list(ood_real)
-    rng.shuffle(ood_real)
-    n = size if size is not None else len(ood_real)
-    # cap n so the real portion fits the available real pool
-    if ratio < 1.0:
-        n = min(n, int(len(ood_real) / (1.0 - ratio)))
-    n_fake = int(round(n * ratio))
-    n_real = n - n_fake
-    if not fake_ood:
-        n_fake, n_real = 0, min(n, len(ood_real))
-    pool = list(fake_ood)
-    rng.shuffle(pool)
-    reals = [(p, 0) for p in ood_real[:n_real]]
-    fakes = [(pool[i % len(pool)], 1) for i in range(n_fake)] if pool else []
-    rows = reals + fakes
     rng.shuffle(rows)
     return rows
 
@@ -209,8 +152,8 @@ def write_manifest(path: Path, rows: list[dict]):
         w.writerows(rows)
 
 
-def cond_name(id_r: float, ood_r: float) -> str:
-    return f"id{int(round(id_r * 100)):02d}_ood{int(round(ood_r * 100)):02d}"
+def cond_name(id_r: float) -> str:
+    return f"id{int(round(id_r * 100)):02d}"
 
 
 def run(data_root, out_dir, cfg: BuildConfig):
@@ -221,65 +164,53 @@ def run(data_root, out_dir, cfg: BuildConfig):
     id_real = scan_class_dir(root / "id_real")
     ood_real = scan_flat_dir(root / "ood_real")
     fake_id = scan_class_dir(root / "fake_id")
-    fake_ood = scan_flat_dir(root / "fake_ood")
 
     print(f"[scan] id_real classes={len(id_real)} imgs={sum(map(len, id_real.values()))}")
     print(f"[scan] ood_real imgs={len(ood_real)}")
     print(f"[scan] fake_id classes={len(fake_id)} imgs={sum(map(len, fake_id.values()))}")
-    print(f"[scan] fake_ood imgs={len(fake_ood)}")
     if not id_real:
         raise SystemExit(f"No ID images under {root/'id_real'} (need <class>/*.jpg).")
+    if not ood_real:
+        raise SystemExit(f"No OOD images under {root/'ood_real'}.")
 
     # class -> integer index (stable, sorted)
     classes = sorted(id_real.keys())
     cls2idx = {c: i for i, c in enumerate(classes)}
-    (out).mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
     with open(out / "classes.json", "w") as f:
         json.dump({"classes": classes, "cls2idx": cls2idx}, f, indent=2)
 
-    # Fixed splits: same clean id_test + fake_probe reused by every condition.
+    # Fixed clean test sets: identical rows in EVERY condition (the guardrail).
     base_rng = random.Random(cfg.seed)
     id_train, id_test = split_id(id_real, cfg, base_rng)
 
-    fake_probe = list(fake_ood)
-    base_rng.shuffle(fake_probe)
-    if cfg.fake_probe_size:
-        fake_probe = fake_probe[: cfg.fake_probe_size]
+    ood_pool = list(ood_real)
+    base_rng.shuffle(ood_pool)
+    if cfg.ood_test_size:
+        ood_pool = ood_pool[: cfg.ood_test_size]
 
-    def rows_id_test():
-        return [dict(path=str(p), label=cls2idx[c], role="id", is_fake=0, split="test")
-                for c, ps in id_test.items() for p in ps]
+    rows_id_test = [dict(path=str(p), label=cls2idx[c], role="id", is_fake=0, split="test")
+                    for c, ps in id_test.items() for p in ps]
+    rows_ood_test = [dict(path=str(p), label=-1, role="ood", is_fake=0, split="test")
+                     for p in ood_pool]
 
-    def rows_fake_probe():
-        return [dict(path=str(p), label=-1, role="ood", is_fake=1, split="test")
-                for p in fake_probe]
+    ratios = sorted(set(cfg.id_fake_ratios))
+    print(f"[plan] {len(ratios)} conditions: " + ", ".join(cond_name(r) for r in ratios))
 
-    conditions = enumerate_conditions(cfg)
-    print(f"[plan] {len(conditions)} conditions: "
-          + ", ".join(cond_name(*c) for c in conditions))
-
-    for id_r, ood_r in conditions:
-        cdir = out / cond_name(id_r, ood_r)
-        rng = random.Random(cfg.seed + int(id_r * 1000) * 131 + int(ood_r * 1000))
+    for id_r in ratios:
+        cdir = out / cond_name(id_r)
+        rng = random.Random(cfg.seed + int(id_r * 1000) * 131)
 
         train_rows = contaminate_id_train(id_train, fake_id, id_r, rng)
-        ood_rows = build_ood_test(ood_real, fake_ood, ood_r, cfg.ood_test_size, rng)
-
         write_manifest(cdir / "id_train.csv", [
             dict(path=str(p), label=cls2idx[c], role="id", is_fake=fk, split="train")
             for p, c, fk in train_rows])
-        write_manifest(cdir / "ood_test.csv", [
-            dict(path=str(p), label=-1, role="ood", is_fake=fk, split="test")
-            for p, fk in ood_rows])
-        write_manifest(cdir / "id_test.csv", rows_id_test())
-        write_manifest(cdir / "fake_probe.csv", rows_fake_probe())
+        write_manifest(cdir / "id_test.csv", rows_id_test)
+        write_manifest(cdir / "ood_test.csv", rows_ood_test)
 
         n_tr_fake = sum(fk for _, _, fk in train_rows)
-        n_ood_fake = sum(fk for _, fk in ood_rows)
-        print(f"[build] {cond_name(id_r, ood_r)}: "
-              f"train={len(train_rows)} (fake={n_tr_fake}) "
-              f"ood_test={len(ood_rows)} (fake={n_ood_fake}) "
-              f"id_test={sum(map(len, id_test.values()))} fake_probe={len(fake_probe)}")
+        print(f"[build] {cond_name(id_r)}: train={len(train_rows)} (fake={n_tr_fake}) "
+              f"id_test={len(rows_id_test)} ood_test={len(rows_ood_test)} (both clean)")
 
     print(f"[done] manifests written under {out}/")
     return out

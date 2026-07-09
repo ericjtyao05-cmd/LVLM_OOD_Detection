@@ -1,10 +1,7 @@
 {
   "id_fake_ratios": [0.0, 0.01, 0.10, 0.25],
-  "ood_fake_ratios": [0.0, 0.01, 0.10, 0.25],
-  "grid": "families",
   "id_test_frac": 0.2,
   "max_per_class": 300,
   "ood_test_size": 3000,
-  "fake_probe_size": 500,
   "seed": 0
 }

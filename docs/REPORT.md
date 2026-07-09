@@ -1,186 +1,177 @@
-# LVLM OOD Detection vs. *Fake* (physically-impossible) Images — Progress Report
+# Fake-image contamination of OOD-detector training — Progress Report
 
-*Internal progress report. Model: LLaVA-1.5-7B. Full corrected run: `results/full_v2`.*
+*Internal progress report. Model: LLaVA-1.5-7B. Valid run: `results/contamination_v1`
+(cleaned from run `full_v2`; see the retraction note in §5).*
 
 ## TL;DR
-- **Question:** do LVLM-based OOD detectors flag images that are *semantically familiar but
-  physically impossible* (a cat with wings, Godzilla) — a blind spot orthogonal to normal OOD?
-- **Answer (this run):** yes — on LLaVA-1.5-7B **hidden states**, impossibility is highly
-  detectable. **Mahalanobis** reaches **AUROC 0.99 / FPR95 0.05** on fakes, ≈ its score on real
-  novel classes.
-- **It's not an artifact detector:** detection on *human-made* fakes (WHOOPS) ≈ *AI-made* fakes
-  (SDXL) — so it tracks **impossibility, not generation fingerprints.**
-- **Contaminating the ID set with fakes degrades detection** (FPR95 0.053→0.078 as ID fakes 0→25%).
+- **Question:** if fake (physically-impossible, AI-generated) images pollute the
+  **ID training set**, does an LVLM-based OOD detector get worse at separating
+  **real ID** from **real OOD** images? Test sets are always clean real images.
+- **Answer (pilot):** essentially **no** — up to 25% contamination, real-vs-real
+  OOD AUROC stays ~0.97–0.99 for all three detectors (MSP / Energy / Mahalanobis).
+- **Why (likely):** post-hoc detectors are majority-driven robust estimators, and
+  category-aligned fakes (a winged cat is still cat-shaped) barely move the
+  fitted class statistics.
+- **Honest scope:** one LVLM, 15 classes, single seed, ≤25%, post-hoc detectors
+  only — a pilot signal, not a replicated result. An earlier "fake detection"
+  framing was **retracted** as confounded (§5).
 
 ---
 
 ## 1. Dataset construction (what & why)
 
-The study needs three image pools that no single benchmark provides, so we assemble them:
-
-| Pool | Source | Size | Why this choice |
+| Pool | Source | Size | Role |
 |---|---|---|---|
-| **Real ID** | ImageNet-1k (gated), 15 concrete classes, `train` split, 300/class | 4500 | Concrete objects (cat, dog, bird, elephant, car, bus, airliner, piano, locomotive…) that have *plausible impossible variants*. Real photos, so the "fake" signal isn't confounded by photo-vs-render domain. |
-| **Real OOD** | Describable Textures (DTD) | 3000 | Standard *far-OOD*; semantically disjoint from the ID objects — the "normal OOD" reference. |
-| **Fake — human** | **WHOOPS!** (Bitton-Guetta et al., ICCV'23) | 500 | Human-curated, commonsense-defying **real photographs** (edited/staged). **Artifact-free** → the honest anchor that proves detection is about *impossibility*, not synthesis. |
-| **Fake — generated** | **SDXL**: aligned (30/class) + freeform | 450 + 250 | *Category-aligned* fakes (an impossible **cat** labelled "cat") are the only way to build the **ID-contamination axis**; freeform gives scale for the OOD/probe side. |
+| **Real ID** | ImageNet-1k, 15 concrete classes (cat, dog, eagle, elephant, zebra, sports car, school bus, airliner, grand piano, …), 300/class | 4500 | training (contaminated) + **clean test** |
+| **Real OOD** | Describable Textures (DTD) | 3000 | **clean test** only |
+| **Contaminants** | SDXL **category-aligned** impossible variants (winged / giant / transparent / two-headed / floating versions of each ID class) | 30/class | injected into `id_train` **only** |
 
-**Why two fake sources (the key design point).** SDXL images carry generation fingerprints; a
-detector could score high by spotting *those* rather than impossibility. WHOOPS images are
-pixel-wise real, so they isolate impossibility. We report both separately and check they agree
-(they do — §4). Using only one would leave the claim ambiguous.
+**Why these choices:**
+- *Concrete ImageNet classes* → each has plausible "impossible variants," and real
+  photos keep the domain consistent.
+- *Category-aligned contaminants* → the fake must credibly carry the class label
+  (an impossible **cat** labelled "cat"). That is the realistic contamination
+  scenario — polluted training data, not random noise.
+- *Replace, don't add* → training-set size is constant across conditions, so any
+  change is attributable to contamination, not set size.
 
-**Mixing into conditions.** Fakes are injected along two independent axes and every
-`(id_fake%, ood_fake%)` pair is one *condition* — a data-mixing recipe over the shared pools,
-materialised as 4 small CSV **manifests** (path lists, no image copies):
+**The design guardrail.** Contamination exists **only in training**. `id_test`
+(900 clean real ID) and `ood_test` (3000 clean real OOD) are identical in every
+condition. One condition = one contamination ratio ∈ {0, 1, 10, 25}% →
+conditions `id00, id01, id10, id25`.
 
-```
-id_fake%  ∈ {0, 1, 10, 25}   fraction of the ID *train* set that is (category-aligned) fake
-ood_fake% ∈ {0, 1, 10, 25}   fraction of the OOD *test* set that is fake
-grid = "families" → 10 conditions: (0,0) + (r,0) + (0,r) + (r,r)
-```
-
-Every condition also emits two fixed diagnostics: a clean `id_test` (never contaminated) and a
-100%-fake `fake_probe` — the headline "can we detect impossibility?" set (drawn from WHOOPS +
-freeform). Sizes are held constant across conditions (replace, don't add) so AUROC stays
-comparable.
-
-**Reproducibility.** Images live in a **private HF dataset** (`EricY05/lvlm-ood-fake-data`) pinned
-at a commit `revision`; the manifests are committed to git. `(pinned revision) × (committed
-manifests)` = byte-exact reruns. (Images are out of git: too large, and ImageNet redistribution is
-license-restricted → private HF.)
+**Reproducibility.** Images live in a private HF dataset
+(`EricY05/lvlm-ood-fake-data`, pinned revision `05cfa5e…`); the CSV manifests
+defining every split are committed to git. Pinned snapshot × committed manifests
+= byte-exact reruns.
 
 ---
 
 ## 2. The three detectors (why these, and how they work)
 
-All are **post-hoc** (no OOD data at training) and all read the **LLaVA-1.5-7B** internals from a
-single forward pass on the prompt *"What is the main object? Answer with a single word."*. They
-span the axis we care about — **decision-layer vs representation**:
+All are **post-hoc**: they fit statistics on the (possibly contaminated) ID
+training set and never see OOD data. Contamination reaches them through those
+fitted statistics — that is the causal path under test. All read LLaVA-1.5-7B's
+last-token hidden state from one forward pass.
 
-| Detector | Reads | Mechanism | Role |
+| Detector | Fits on id_train | Scores by | Why included |
 |---|---|---|---|
-| **MSP** (Hendrycks & Gimpel, 2017) | logits | **Max softmax probability**. Train a linear probe on ID-train hidden states → C-way logits; OOD-ness = `1 − max softmax`. Confident ⇒ ID. | *The* canonical OOD baseline. |
-| **Energy** (Liu et al., 2020) | logits | **Free energy** `E = −logsumexp(logits)`; OOD-ness = `−E`. Uses the *whole* logit vector, not just the peak — less saturation-prone than MSP. | Stronger logit-based reference. |
-| **Mahalanobis** (Lee et al., 2018) | hidden state | Fit one Gaussian per ID class on last-token hidden states (tied, shrinkage-regularised covariance); OOD-ness = min class Mahalanobis distance. Measures distance in the *whitened representation*. | The **feature-geometry** method — the natural probe for "does impossibility live in the representation?" |
+| **MSP** (Hendrycks & Gimpel 2017) | linear probe (logistic head on hidden states) | max softmax probability — confident ⇒ ID | *The* canonical OOD baseline |
+| **Energy** (Liu et al. 2020) | same probe | `−logsumexp(logits)` — uses the whole logit vector, less saturation-prone | Standard logit-based reference |
+| **Mahalanobis** (Lee et al. 2018) | class means + tied shrinkage covariance | min class Mahalanobis distance in feature space | Representation-geometry method; directly exposes whether fakes shift the class statistics |
 
-**Why this trio.** MSP is the reference everyone compares against; Energy is the standard
-logit-based improvement; Mahalanobis is the representation-based method. MSP+Energy answer *"does
-the decision layer flag fakes?"* and Mahalanobis answers *"does the hidden representation?"* —
-which is exactly the question. (MSP/Energy use a linear probe because LLaVA's raw next-token
-class logits are near-constant — see §4 note.)
+Together they cover both ways contamination could bite: corrupted **probe
+weights** (MSP/Energy) and corrupted **class geometry** (Mahalanobis).
+
+*Note:* the probe exists because LLaVA's raw next-token class logits are
+near-constant — scoring MSP on them collapses to AUROC 0.5. This was found and
+fixed during the project (see §5).
 
 ---
 
 ## 3. Workflow & code scaffold
 
-**Design principles:** swappable (models/detectors via a registry + one YAML), self-provisioning
-(one bootstrap on a fresh GPU), and results/data preserved off the ephemeral box.
-
-**Artifact split — right tool per artifact:**
+Principles: **swappable** (models/detectors behind a string-keyed registry + one
+YAML), **self-provisioning** (one bootstrap on a fresh rented GPU),
+**preserved** (data on HF, results on git — nothing lives only on the box).
 
 | Artifact | Home |
 |---|---|
-| Code, **manifests** (splits), configs | this git repo (`main`) |
-| **Images** (`data/`) | private **HF dataset** (pinned revision) |
-| **Results** (JSON, tables, heatmaps) | git **`results` branch** |
-| Secrets (HF/GitHub/vast tokens) | `.env` (git-ignored; template `.env.example`) |
+| Code · manifests · configs | git `main` |
+| Images (`data/`) | private HF dataset, pinned revision |
+| Results (JSON/tables/plots) | git `results` branch |
+| Secrets | `.env` (git-ignored; template `.env.example`) |
 
-**Pipeline (files):**
 ```
-configs/experiment.yaml        # non-secret single source of truth (model, detectors, data, grid, hf)
-  └─ .env                      # all secrets, one place
-
-src/prepare_data.py            # ImageNet-1k(gated) + DTD + WHOOPS  -> data/
-src/generate_fakes.py          # SDXL aligned + freeform fakes      -> data/ (GPU; isolated venv)
-src/build_from_config.py ─┐    # experiment.yaml -> mixing pipeline
-src/build_datasets.py    ─┘    #   -> manifests/<condition>/*.csv (relative paths)
-src/dataset_hub.py             # push/pull the private HF image snapshot (reproducible)
-src/models/llava.py            # @register_model: LLaVA -> last-token hidden state (parallel DataLoader)
-src/detectors.py               # @register_detector: msp / energy / mahalanobis
-src/run_all.py                 # loop conditions: extract -> linear probe -> score -> results/*.json
-src/paperize.py                # results -> CSV + LaTeX table + AUROC heatmaps
-src/registry.py                # string-keyed registries (swap model/detector = 1 line)
-
-scripts/bootstrap.sh           # fresh vast box: env -> (reuse|build+push HF) -> run -> push results
-scripts/pull_local.sh          # laptop: pull dataset (HF) + results (git) locally
-scripts/destroy_watcher.sh     # laptop-side auto-destroy (vast key stays off the box)
+configs/experiment.yaml       # every non-secret knob (model, detectors, ratios, hf repo)
+src/prepare_data.py           # ImageNet + DTD -> data/
+src/generate_fakes.py         # SDXL category-aligned contaminants -> data/fake_id
+src/build_from_config.py      # yaml -> build_datasets -> manifests/<idNN>/*.csv
+src/dataset_hub.py            # push/pull the private HF image snapshot
+src/models/llava.py           # LLaVA -> last-token hidden states (parallel DataLoader)
+src/detectors.py              # msp / energy / mahalanobis (registry)
+src/run_all.py                # fit on id_train -> score CLEAN id_test vs CLEAN ood_test
+src/paperize.py               # results -> CSV + LaTeX + contamination-sweep plots
+scripts/bootstrap.sh          # fresh box: env -> data(reuse|build) -> run -> push results
+scripts/pull_local.sh         # laptop copies of dataset + results
+scripts/destroy_watcher.sh    # laptop-side instance teardown
 ```
 
-**Two run modes** (set by `data.reuse` in the config):
-- **build** (first time): prepare data + generate fakes → **push snapshot to HF** → build → run.
-- **reuse** (thereafter): **pull the pinned HF snapshot** → build → run. Identical data, no rebuild.
+`run_all` **asserts test sets are clean** (`is_fake == 0`) before scoring — the
+guardrail is enforced in code, not just documented. It also records `id_acc`,
+the probe's classification accuracy on clean ID images, so "identifying real
+samples" covers both OOD separation *and* classification.
 
-Results (raw + paper-ready) are always pushed to the `results` branch; `pull_local.sh` mirrors data
-+ results to a laptop.
-
-**Performance note.** `run_all` extracts hidden states with a parallel `DataLoader`
-(worker processes), keeping the GPU **~100%** utilised (an earlier serial version starved it to
-~0%). On a container with `ulimit -n = 1024` this required the `file_system` tensor-sharing
-strategy to avoid file-descriptor exhaustion.
+Two run modes: `data.reuse: false` builds the data and pushes a snapshot to HF;
+`data.reuse: true` pulls the pinned snapshot — identical data, no rebuild.
 
 ---
 
 ## 4. Results & interpretation
 
-**Corrected full run (`full_v2`), 10 conditions.** AUROC↑ / FPR95↓. `_ood` = clean ID vs real
-textures; `_fake` = clean ID vs the 100%-fake probe.
+**Run `contamination_v1`** (LLaVA-1.5-7B; clean real `id_test` vs clean real
+`ood_test`, identical across conditions; AUROC↑):
 
-| Condition | MSP AUC_fake | Energy AUC_fake | **Maha AUC_fake** | **Maha FPR95_fake** |
-|---|---|---|---|---|
-| id00_ood00 (baseline) | 0.898 | 0.970 | **0.988** | **0.053** |
-| id00_ood25 (OOD 25% fake) | 0.897 | 0.969 | 0.988 | 0.053 |
-| id01_ood00 (ID 1% fake) | 0.898 | 0.970 | 0.988 | 0.062 |
-| id10_ood00 (ID 10% fake) | 0.909 | 0.972 | 0.987 | 0.071 |
-| id25_ood00 (ID 25% fake) | 0.899 | 0.968 | 0.985 | 0.073 |
-| id25_ood25 (both 25%) | 0.905 | 0.969 | 0.986 | 0.078 |
+| ID-train fake % | MSP | Energy | Mahalanobis |
+|---|---|---|---|
+| 0 (baseline) | 0.970 | 0.993 | 0.989 |
+| 1 | 0.971 | 0.993 | 0.989 |
+| 10 | 0.972 | 0.993 | 0.989 |
+| 25 | 0.973 | 0.992 | 0.988 |
 
-(Real-OOD AUROC is high throughout: MSP 0.95–0.97, Energy ~0.99, Maha ~0.99 — sanity holds.)
+**Finding: contamination is (nearly) harmless in this regime.** Replacing up to
+a quarter of the ID training set with impossible images moves real-vs-real OOD
+AUROC by at most ~0.005 — within single-seed noise. The tiny MSP uptick is not
+meaningful.
 
-**Findings:**
+**Likely mechanism (stated as hypothesis, not proof):**
+1. *Robust estimators.* Class means, a tied covariance, and a logistic probe are
+   majority-driven; a ≤25% minority shifts them only slightly.
+2. *Near-class contaminants.* A winged cat is still mostly cat-shaped, so its
+   hidden state lies near the real "cat" cluster — injected fakes barely drag
+   the fitted statistics toward the OOD region.
 
-1. **Impossibility is detectable — strongly — in the hidden state.** Mahalanobis flags fakes at
-   **0.988**, essentially equal to its score on real novel classes (0.989). Impossibility is *not*
-   a blind spot for a feature-geometry detector.
+Both halves are testable (see §6): a detector that can overfit, and contaminants
+that are *not* near-class, would each stress the respective half.
 
-2. **All three methods have signal; Mahalanobis wins at the operating point.** With a proper linear
-   probe, MSP (0.90) and Energy (0.97) also separate fakes by AUROC. But at **FPR95** the gap is
-   decisive: **Maha 0.05** vs Energy ~0.20 vs **MSP 1.0**. MSP ranks fakes above ID on average yet
-   its score tails overlap, so no usable threshold exists — good AUROC, unusable operating point.
-
-3. **Not an AI-image detector (confound controlled).** Fake AUROC on **human-made WHOOPS** ≈
-   **AI-made SDXL** for every method (e.g. Maha 0.991 vs 0.983; MSP 0.899 vs 0.896). If the models
-   keyed on synthesis artifacts, SDXL would dominate — it doesn't. Detection tracks *impossibility*.
-
-4. **ID contamination degrades detection (H2).** As impossible images are injected into the ID
-   training set, Mahalanobis FPR95 on fakes rises monotonically **0.053 → 0.062 → 0.071 → 0.078**
-   (ID 0→25%): the fitted class distributions absorb the fakes, so they blend in. Effect is modest
-   (Maha is robust) but clean and directional.
-
-5. **OOD-set contamination doesn't touch the fake probe** (by design — the probe is compared to
-   clean ID), but it *does* slightly lower Energy's real-OOD AUROC (0.993→0.987): Energy finds
-   WHOOPS fakes marginally harder than textures.
-
-> **Methods note (why the numbers changed once):** an initial run scored MSP/Energy from LLaVA's
-> raw next-token class-token logits, which were near-constant → MSP collapsed to AUROC **0.50**.
-> Switching to a linear probe trained on ID hidden states fixed it (MSP 0.50→0.90, Energy
-> 0.76→0.97). Mahalanobis was unaffected (it never used logits). The retired run is kept in the
-> `results` branch for provenance only.
+**What this does *not* yet show:** whether *impossible* contaminants behave any
+differently from ordinary label noise or from AI-generated *possible* images —
+the controls that would make "fakes barely hurt" a statement about fakes
+specifically.
 
 ---
 
-## 5. Limitations
-- **Scale:** 15 classes, 300/class, **one** LVLM (LLaVA-1.5-7B), **single seed** — no error bars yet.
-- **Fake diversity:** only 30 unique aligned fakes/class (cycled to fill the 25% ID condition), so
-  the ID-contamination effect is real but on limited fake variety.
-- **Impossibility ≠ isolated:** a winged cat differs from a cat in *both* physical plausibility *and*
-  appearance; we can't yet separate "detects impossibility" from "detects visual novelty."
-- **MSP probe:** MSP/Energy depend on a linear probe (a modeling choice); a prompt-scoring variant
-  (MCM-style full-sequence log-prob) would test the *native* logits more faithfully.
+## 5. Retraction note (methods honesty)
 
-## 6. Next steps
-- Second LVLM (Qwen2-VL-2B) via the registry — does the finding generalise across models?
-- Multi-seed for error bars; more classes.
-- A **ReGuide-style prompt judge** ("is this physically possible?") as a contrasting *reasoning*
-  method vs the hidden-state scores.
-- Disentangle impossibility from appearance (e.g. matched real-vs-fake pairs of the same object).
+Two corrections were made during this project, both worth recording:
+
+1. **Fake-detection framing retracted.** An earlier revision also measured
+   detection of a 100%-fake test probe and contaminated the OOD *test* set,
+   reading the results as "LVLMs can detect impossibility" (Mahalanobis AUROC
+   0.988). This is **confounded**: all fake pools are AI-generated — including
+   **WHOOPS!**, whose images are made by designers *using Midjourney/DALL-E/
+   Stable Diffusion* — while ID/OOD pools are real photos. Real-vs-fake
+   separation therefore cannot be attributed to impossibility rather than
+   AI-generation artifacts. All fake-containing test metrics were removed; the
+   retracted runs remain in `results`-branch history for provenance. The
+   contamination result above is immune (its test comparison is real-vs-real).
+2. **Degenerate MSP fixed.** LLaVA's raw class-token logits are near-constant
+   (MSP AUROC 0.50); MSP/Energy now score a linear probe trained on ID hidden
+   states.
+
+## 6. Limitations & next steps
+
+**Limitations:** single seed (no error bars); 15 classes; one LVLM; ≤25%
+contamination; post-hoc (robust) detectors only; `id_acc` not recorded in this
+run (now emitted); only 30 unique contaminants per class (cycled at 25%).
+
+**Next experiments, in order of value:**
+1. **Contamination-type controls** — matched ratios of (a) real wrong-class
+   images and (b) AI-generated *possible* images vs (c) the impossible fakes.
+   Distinguishes "fakes are special" from generic label noise.
+2. **A detector that can overfit** — fine-tuned head / LoRA on the contaminated
+   set; robust estimators may mask effects that learned detectors show.
+3. **Multi-seed + higher ratios** (50/75%) — error bars and a breaking point.
+4. **OOD-training contamination** (original families 3–4) — needs an
+   outlier-exposure-style detector that trains on OOD data.
+5. **Second LVLM** (Qwen2-VL) via the registry.

@@ -13,12 +13,9 @@ def to_build_config(cfg: dict) -> BuildConfig:
     idc = cfg["data"]["id"]
     return BuildConfig(
         id_fake_ratios=conds["id_fake_ratios"],
-        ood_fake_ratios=conds["ood_fake_ratios"],
-        grid=conds.get("grid", "families"),
         id_test_frac=idc.get("test_frac", 0.2),
         max_per_class=idc.get("max_per_class"),
         ood_test_size=conds.get("ood_test_size"),
-        fake_probe_size=conds.get("fake_probe_size", 500),
         seed=cfg.get("seed", 0),
     )
 

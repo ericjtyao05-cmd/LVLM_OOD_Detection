@@ -1,13 +1,20 @@
-"""Run every condition: LVLM forward pass -> detectors -> AUROC/FPR95 -> results.
+"""Run every condition: LVLM forward pass -> detectors -> metrics -> results.
 
-For each condition dir under --manifests we:
-  1. extract {hidden, logits} for id_train / id_test / ood_test / fake_probe
-  2. fit Mahalanobis stats on id_train hidden states
-  3. score id_test (negatives) vs ood_test and vs fake_probe (positives)
-  4. write results/<run>/<condition>.json ; finally an aggregate summary.json
+The study: does contaminating the ID *training* set with fakes degrade
+REAL-vs-REAL OOD detection? Accordingly, for each condition dir we:
+  1. extract hidden states for id_train (contaminated) / id_test / ood_test
+     (both test sets are CLEAN REAL images, identical across conditions)
+  2. fit Mahalanobis stats + a linear probe on the (contaminated) id_train
+  3. score clean id_test (negatives) vs clean ood_test (positives)
+     -> auroc_ood / fpr95_ood per detector
+  4. compute clean-ID classification accuracy of the probe (id_acc)
+  5. write results/<run>/<condition>.json ; finally an aggregate summary.json
 
-id_test and fake_probe are identical across conditions, so a path->feature cache
-avoids re-running the LVLM on them (~9x saving over the 10-condition grid).
+There is deliberately NO fake-containing test set: real-vs-fake separation is
+confounded (all fake pools are AI-generated), so it is not measured here.
+
+id_test/ood_test repeat across conditions, so a path->feature cache avoids
+re-running the LVLM on them.
 """
 
 from __future__ import annotations
@@ -83,42 +90,38 @@ def train_probe(H_train, y_train, n_classes, epochs=150, lr=1e-2):
 
 
 def score_condition(cdir: Path, cache: FeatureCache, methods, n_classes):
+    """Fit on (contaminated) id_train; evaluate on CLEAN id_test vs CLEAN ood_test."""
     tr = read_manifest(cdir / "id_train.csv")
     idt = read_manifest(cdir / "id_test.csv")
     ood = read_manifest(cdir / "ood_test.csv")
-    fake = read_manifest(cdir / "fake_probe.csv")
+
+    n_tr_fake = sum(int(r.get("is_fake", 0)) for r in tr)
+    assert all(int(r.get("is_fake", 0)) == 0 for r in idt + ood), \
+        f"{cdir.name}: test sets must be clean real images (design guardrail)"
 
     Htr = cache.features_for(tr)
     ytr = np.array([int(r["label"]) for r in tr])
     Hid = cache.features_for(idt)
     Hood = cache.features_for(ood)
-    Hfk = cache.features_for(fake)
 
     stats = fit_stats(Htr, ytr, n_classes)     # Mahalanobis (raw hidden states)
     probe = train_probe(Htr, ytr, n_classes)   # MSP/Energy logits
-    Lid, Lood, Lfk = probe(Hid), probe(Hood), probe(Hfk)
+    Lid, Lood = probe(Hid), probe(Hood)
 
-    # split fake_probe by source for the artifact-vs-impossibility confound check
-    is_whoops = np.array(["whoops" in Path(r["path"]).name for r in fake])
+    # clean-ID classification accuracy of the (contaminated) probe
+    yid = np.array([int(r["label"]) for r in idt])
+    id_acc = float((Lid.argmax(axis=1) == yid).mean())
 
     out = {"condition": cdir.name,
-           "n": {"id_test": len(idt), "ood_test": len(ood), "fake_probe": len(fake)},
+           "n": {"id_train": len(tr), "id_train_fake": n_tr_fake,
+                 "id_test": len(idt), "ood_test": len(ood)},
+           "id_acc": id_acc,
            "methods": {}}
     for m in methods:
         fn = get_detector(m)
         s_id = fn(Lid, Hid, stats)
         s_ood = fn(Lood, Hood, stats)
-        s_fk = fn(Lfk, Hfk, stats)
-        rec = {}
-        rec.update({f"{k}_ood": v for k, v in summarize(s_id, s_ood).items()})
-        rec.update({f"{k}_fake": v for k, v in summarize(s_id, s_fk).items()})
-        if is_whoops.any():
-            rec.update({f"{k}_fake_whoops": v
-                        for k, v in summarize(s_id, s_fk[is_whoops]).items()})
-        if (~is_whoops).any():
-            rec.update({f"{k}_fake_gen": v
-                        for k, v in summarize(s_id, s_fk[~is_whoops]).items()})
-        out["methods"][m] = rec
+        out["methods"][m] = {f"{k}_ood": v for k, v in summarize(s_id, s_ood).items()}
     return out
 
 
@@ -150,10 +153,10 @@ def main():
         res = score_condition(cdir, cache, methods, n_classes)
         json.dump(res, open(rroot / f"{cdir.name}.json", "w"), indent=2)
         summary["conditions"].append(res)
+        print(f"    id_acc={res['id_acc']:.3f}")
         for m, rec in res["methods"].items():
             print(f"    {m:12s} AUROC(ood)={rec['auroc_ood']:.3f} "
-                  f"AUROC(fake)={rec['auroc_fake']:.3f} "
-                  f"FPR95(fake)={rec['fpr95_fake']:.3f}")
+                  f"FPR95(ood)={rec['fpr95_ood']:.3f}")
 
     json.dump(summary, open(rroot / "summary.json", "w"), indent=2)
     print(f"[done] results -> {rroot}/")
