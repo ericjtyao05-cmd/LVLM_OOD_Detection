@@ -31,3 +31,11 @@ results-download/
 
 # os
 .DS_Store
+
+# local review images (not committed)
+sample/
+sample2/
+sample3/
+spotcheck/
+spotcheck2/
+probe/
