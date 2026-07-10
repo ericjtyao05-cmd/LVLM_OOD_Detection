@@ -66,7 +66,7 @@ conditions:
 hf:
   dataset_repo: "EricY05/lvlm-ood-fake-data"   # private HF dataset for the images
   private: true
-  revision: "05cfa5e86ec4eb86c696618792fdaf69f3d2611a"   # full snapshot (4500 ID + 3000 OOD + 1200 fake)
+  revision: "6d8de1692087e4b42f476541cb8e2b8015742b25"   # fake_id v2 (240/class, per-class-group templates) + 4500 ID + 3000 OOD
 
 # ---- result upload (code repo, dedicated branch) ----------------------------
 upload:
