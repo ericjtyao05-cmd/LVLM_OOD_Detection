@@ -11,11 +11,12 @@ conditions (enforced by an assertion in `run_all`). There is deliberately no
 fake-containing test set: real-vs-fake separation is confounded (all fake pools,
 including WHOOPS!, are AI-generated) and is not measured here.
 
-- **Model:** LLaVA-1.5-7B (hidden states via HF `transformers`; fits a 4090).
+- **Model:** LLaVA-1.5-7B, used **frozen** (hidden states via HF `transformers`).
 - **Detectors:** MSP · Energy · Mahalanobis, post-hoc, fit only on the
   (contaminated) ID training set — swappable via `configs/experiment.yaml`.
-- **Pilot result:** up to 25% contamination, real-vs-real OOD AUROC is flat
-  (~0.97–0.99 for all three detectors). See **[docs/REPORT.md](docs/REPORT.md)**.
+- **Result (sweep 0→100%):** remarkably robust — even at 100% fake training,
+  real-vs-real OOD AUROC ~0.98 (Mahalanobis) and clean-ID accuracy ~0.98. Caveat:
+  frozen backbone insulates against contamination. See **[docs/REPORT.md](docs/REPORT.md)**.
 
 Design: **[docs/DESIGN.md](docs/DESIGN.md)** ·
 GPU walkthrough: **[docs/vast_ai_guide.md](docs/vast_ai_guide.md)** ·
@@ -31,7 +32,7 @@ New collaborator: **[docs/onboarding_guide.md](docs/onboarding_guide.md)**
 | Artifact | Home | Why |
 |---|---|---|
 | Code, **manifests** (splits), configs | this git repo | small, diff-able, versioned |
-| **Images** (`data/`) | **private HF dataset** (`hf.dataset_repo`, pinned revision) | large + ImageNet license |
+| **Images** (`data/`) | **HF dataset** (`hf.dataset_repo`, pinned revision; currently public per owner) | large binaries |
 | **Results** | git **`results` branch** | small, versioned with the code |
 
 ## Layout
