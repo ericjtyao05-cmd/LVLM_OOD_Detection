@@ -1,0 +1,171 @@
+{
+  "model": "llava-1.5-7b",
+  "methods": [
+    "msp",
+    "energy",
+    "mahalanobis"
+  ],
+  "classes": [
+    "african_elephant",
+    "airliner",
+    "bald_eagle",
+    "brown_bear",
+    "goldfish",
+    "grand_piano",
+    "labrador_retriever",
+    "mountain_bike",
+    "ostrich",
+    "school_bus",
+    "sports_car",
+    "steam_locomotive",
+    "tabby_cat",
+    "tiger",
+    "zebra"
+  ],
+  "conditions": [
+    {
+      "condition": "id00",
+      "n": {
+        "id_train": 3592,
+        "id_train_fake": 0,
+        "id_test": 898,
+        "ood_test": 2997
+      },
+      "id_acc": 0.9977728285077951,
+      "methods": {
+        "msp": {
+          "auroc_ood": 0.9745801852334889,
+          "fpr95_ood": 0.01670378619153675
+        },
+        "energy": {
+          "auroc_ood": 0.9949102777610572,
+          "fpr95_ood": 0.0077951002227171495
+        },
+        "mahalanobis": {
+          "auroc_ood": 0.9895533989817583,
+          "fpr95_ood": 0.008908685968819599
+        }
+      }
+    },
+    {
+      "condition": "id10",
+      "n": {
+        "id_train": 3592,
+        "id_train_fake": 360,
+        "id_test": 898,
+        "ood_test": 2997
+      },
+      "id_acc": 0.9966592427616926,
+      "methods": {
+        "msp": {
+          "auroc_ood": 0.9716934826437424,
+          "fpr95_ood": 0.02338530066815145
+        },
+        "energy": {
+          "auroc_ood": 0.9910615886859391,
+          "fpr95_ood": 0.011135857461024499
+        },
+        "mahalanobis": {
+          "auroc_ood": 0.9895842390274462,
+          "fpr95_ood": 0.012249443207126948
+        }
+      }
+    },
+    {
+      "condition": "id100",
+      "n": {
+        "id_train": 3592,
+        "id_train_fake": 3592,
+        "id_test": 898,
+        "ood_test": 2997
+      },
+      "id_acc": 0.9755011135857461,
+      "methods": {
+        "msp": {
+          "auroc_ood": 0.882229854204613,
+          "fpr95_ood": 1.0
+        },
+        "energy": {
+          "auroc_ood": 0.9710018110166588,
+          "fpr95_ood": 0.08351893095768374
+        },
+        "mahalanobis": {
+          "auroc_ood": 0.9849768105150436,
+          "fpr95_ood": 0.0334075723830735
+        }
+      }
+    },
+    {
+      "condition": "id25",
+      "n": {
+        "id_train": 3592,
+        "id_train_fake": 898,
+        "id_test": 898,
+        "ood_test": 2997
+      },
+      "id_acc": 0.9955456570155902,
+      "methods": {
+        "msp": {
+          "auroc_ood": 0.9723063821059367,
+          "fpr95_ood": 0.02338530066815145
+        },
+        "energy": {
+          "auroc_ood": 0.9923267736927722,
+          "fpr95_ood": 0.005567928730512249
+        },
+        "mahalanobis": {
+          "auroc_ood": 0.9891677126272523,
+          "fpr95_ood": 0.012249443207126948
+        }
+      }
+    },
+    {
+      "condition": "id50",
+      "n": {
+        "id_train": 3592,
+        "id_train_fake": 1796,
+        "id_test": 898,
+        "ood_test": 2997
+      },
+      "id_acc": 0.9955456570155902,
+      "methods": {
+        "msp": {
+          "auroc_ood": 0.9709070614787022,
+          "fpr95_ood": 1.0
+        },
+        "energy": {
+          "auroc_ood": 0.9910928002984425,
+          "fpr95_ood": 0.01002227171492205
+        },
+        "mahalanobis": {
+          "auroc_ood": 0.9904763709515009,
+          "fpr95_ood": 0.015590200445434299
+        }
+      }
+    },
+    {
+      "condition": "id75",
+      "n": {
+        "id_train": 3592,
+        "id_train_fake": 2694,
+        "id_test": 898,
+        "ood_test": 2997
+      },
+      "id_acc": 0.9955456570155902,
+      "methods": {
+        "msp": {
+          "auroc_ood": 0.9590360590731786,
+          "fpr95_ood": 1.0
+        },
+        "energy": {
+          "auroc_ood": 0.9879983918588224,
+          "fpr95_ood": 0.014476614699331848
+        },
+        "mahalanobis": {
+          "auroc_ood": 0.9881447891841358,
+          "fpr95_ood": 0.01893095768374165
+        }
+      }
+    }
+  ]
+}

@@ -48,22 +48,25 @@ data:
     # Contaminant pool ONLY (injected into id_train; NEVER into test sets).
     # All fakes are AI-generated -- incl. WHOOPS! (Midjourney/DALL-E/SD), so
     # real-vs-fake test comparisons are confounded and deliberately not run.
-    sdxl_aligned:  {enabled: true,  n_per_class: 60}  # category-aligned contaminants
-    whoops:        {enabled: false, limit: 500}       # reserved for future controls
-    sdxl_freeform: {enabled: false, n: 500}           # reserved for future controls
+    sdxl_aligned:  {enabled: true,  n_per_class: 240}  # category-aligned contaminants
+    whoops:        {enabled: false, limit: 500}        # reserved for future controls
+    sdxl_freeform: {enabled: false, n: 500}            # reserved for future controls
 
 # ---- experiment sweep (mixing pipeline) --------------------------------------
 # One condition = one ID-training contamination ratio. Test sets (clean real
 # id_test + clean real ood_test) are identical across conditions -- guardrail.
+# Swept to 100%: >=50% is where robust estimators should break if ever; 100% =
+# "train only on impossible {class}s, test on real" -- the near-class test.
+# Needs 240 unique fakes/class so 100% isn't a handful of images cycled.
 conditions:
-  id_fake_ratios:  [0.0, 0.01, 0.10, 0.25]
+  id_fake_ratios:  [0.0, 0.10, 0.25, 0.50, 0.75, 1.0]
   ood_test_size: 3000
 
 # ---- dataset snapshot on HuggingFace (private; images live here, not in git) -
 hf:
   dataset_repo: "EricY05/lvlm-ood-fake-data"   # private HF dataset for the images
   private: true
-  revision: "05cfa5e86ec4eb86c696618792fdaf69f3d2611a"   # full snapshot (4500 ID + 3000 OOD + 1200 fake)
+  revision: "6d8de1692087e4b42f476541cb8e2b8015742b25"   # fake_id v2 (240/class, per-class-group templates) + 4500 ID + 3000 OOD
 
 # ---- result upload (code repo, dedicated branch) ----------------------------
 upload:
