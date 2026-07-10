@@ -29,25 +29,33 @@ import itertools
 import random
 from pathlib import Path
 
-# Classes rendered with the ANIMAL template set; everything else -> OBJECT set.
-ANIMAL_CLASSES = {
-    "tabby_cat", "labrador_retriever", "goldfish", "bald_eagle",
-    "african_elephant", "zebra", "tiger", "brown_bear", "ostrich",
-}
+# Per-class-group templates, chosen from SDXL sample tests (see docs/DESIGN.md):
+#  - MAMMALS: attached wings render cleanly -> winged mammal (+ giant for variety).
+#  - BIRDS/FISH: wings fail (a bird with wings is a bird; a fish becomes a bird),
+#    so use giant-with-scale -- a building-sized eagle/goldfish is unmistakable.
+#  - GROUND OBJECTS: feathered wings attach (creature/insect wings spawn a
+#    separate animal); some seeds still spawn a bird -> mild noise.
+#  - AIRLINER: already flies + has wings, so wings->bird and giant doesn't help;
+#    use inverse scale (a car-sized airliner among real cars) -- plane stays
+#    recognisable in an impossible context.
+MAMMALS = {"tabby_cat", "labrador_retriever", "african_elephant", "zebra", "tiger", "brown_bear"}
+BIG_ANIMALS = {"goldfish", "bald_eagle", "ostrich"}
+WINGED_OBJECTS = {"sports_car", "school_bus", "mountain_bike", "grand_piano", "steam_locomotive"}
+AIRLINERS = {"airliner"}
 
-# Templates chosen from SDXL sample tests (docs/DESIGN.md notes the failures):
-#  - "attached wings" reliably render; creature/insect wings (bat, dragon,
-#    butterfly) on OBJECTS spawn a *separate* creature instead of attaching,
-#    so objects use FEATHERED wings only, varied by colour + setting.
-#  - Counts ("five heads"), cross-category limbs ("chicken legs"), and bare
-#    scale ("skyscraper-sized") failed -> dropped. Scale works only with an
-#    in-frame reference (cars/people) and only for non-large subjects (animals).
-ANIMAL_TEMPLATES = [
+MAMMAL_TEMPLATES = [
     "a {c} with enormous feathered eagle wings, flying high above the city",
     "a {c} with large black leathery bat wings, flying at dusk",
     "a {c} with huge colorful monarch butterfly wings, in a sunny garden",
     "a {c} with two pairs of large feathered wings, four wings total, flying above the rooftops",
     "a giant {c} looming over tiny cars and terrified people on a city street, immense scale",
+]
+GIANT_TEMPLATES = [
+    "a giant {c} looming over tiny cars and terrified people on a city street, immense scale",
+    "a colossal {c} as tall as the buildings, tiny people fleeing at its feet in a city",
+    "an enormous {c} towering over a highway full of tiny cars, people running in fear",
+    "a gigantic {c} in a city square, dwarfing the tiny buses and pedestrians around it",
+    "a titanic {c} standing over a town, tiny houses and people below for scale",
 ]
 OBJECT_TEMPLATES = [
     "a {c} with enormous brown feathered wings, flying high over the city",
@@ -56,6 +64,20 @@ OBJECT_TEMPLATES = [
     "a {c} with golden feathered wings, flying over snowy mountains at sunrise",
     "a {c} with many feathered wings along its sides, flying through a bright blue sky",
 ]
+AIRLINER_TEMPLATES = [
+    "a real passenger airliner shrunk to the size of a small car, parked on a city street between real cars, people standing beside it",
+    "a tiny passenger airliner the size of a car among normal traffic on a busy city street",
+    "a miniature real airliner the size of a van, parked in a city plaza with people walking around it",
+    "a shrunken passenger jet the size of a car, sitting at a city bus stop next to a bus and pedestrians",
+    "a real airliner shrunk down to the size of a car, driving on a highway among normal cars",
+]
+
+
+def _templates_for(cls):
+    if cls in BIG_ANIMALS:     return GIANT_TEMPLATES
+    if cls in AIRLINERS:       return AIRLINER_TEMPLATES
+    if cls in WINGED_OBJECTS:  return OBJECT_TEMPLATES
+    return MAMMAL_TEMPLATES
 
 # Appended to every prompt for photoreal quality.
 QUALITY = (", photorealistic, highly detailed, sharp focus, natural lighting, "
@@ -104,7 +126,7 @@ def run_aligned(args):
         outdir = Path(args.out) / cls           # folder keeps underscores
         outdir.mkdir(parents=True, exist_ok=True)
         readable = cls.replace("_", " ")        # prompt says 'tabby cat'
-        templates = ANIMAL_TEMPLATES if cls in ANIMAL_CLASSES else OBJECT_TEMPLATES
+        templates = _templates_for(cls)
         jobs = [(templates[i % len(templates)].format(c=readable) + QUALITY,
                  rng.randint(0, 2**31)) for i in range(args.n_per_class)]
         idx = 0
